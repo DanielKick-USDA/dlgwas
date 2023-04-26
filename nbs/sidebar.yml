@@ -2,4 +2,6 @@ website:
   sidebar:
     contents:
       - index.ipynb
+      - 00_core-Copy1.ipynb
       - 00_core.ipynb
+      - 01_zma_kegg_download.ipynb
