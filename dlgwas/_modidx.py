@@ -5,4 +5,8 @@ d = { 'settings': { 'branch': 'main',
                 'doc_host': 'https://DanielKick-USDA.github.io',
                 'git_url': 'https://github.com/DanielKick-USDA/dlgwas',
                 'lib_path': 'dlgwas'},
-  'syms': {'dlgwas.core': {'dlgwas.core.foo': ('core.html#foo', 'dlgwas/core.py')}}}
+  'syms': { 'dlgwas.core': { 'dlgwas.core.download_kegg_gene': ('zma_kegg_download.html#download_kegg_gene', 'dlgwas/core.py'),
+                             'dlgwas.core.ensure_dir_path_exists': ('zma_kegg_download.html#ensure_dir_path_exists', 'dlgwas/core.py'),
+                             'dlgwas.core.get_kegg_species_list': ('zma_kegg_download.html#get_kegg_species_list', 'dlgwas/core.py'),
+                             'dlgwas.core.mkdf_kegg_species_list': ('zma_kegg_download.html#mkdf_kegg_species_list', 'dlgwas/core.py'),
+                             'dlgwas.core.read_kegg_gene': ('zma_kegg_download.html#read_kegg_gene', 'dlgwas/core.py')}}}
