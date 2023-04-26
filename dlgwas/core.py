@@ -20,6 +20,7 @@ def ensure_dir_path_exists(dir_path = '../ext_data'):
 
 def get_kegg_species_list(species = 'zma'):
     import os
+    import requests
     # make sure the directory exists to hold these data
     ensure_dir_path_exists(dir_path = '../ext_data/'+species+'/kegg')
 
