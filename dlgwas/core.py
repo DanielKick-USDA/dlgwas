@@ -62,8 +62,6 @@ def download_kegg_gene(kegg_gene = 'zma:103644366', **kwargs):
     kegg_gene_safename = kegg_gene.replace(':', '_') # name that's safe for file names
     file_path = dir_path+kegg_gene_safename+'.txt'
     
-    
-   
     # only download if the file doesn't already exist
     if os.path.exists(file_path):
         pass
