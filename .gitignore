@@ -149,3 +149,10 @@ checklink/cookies.txt
 
 # Quarto
 .quarto
+
+
+# Project Specific Folders (with large objects)
+ext_data/
+data/
+models/
+reports/
