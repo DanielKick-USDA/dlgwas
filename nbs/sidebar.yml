@@ -2,6 +2,7 @@ website:
   sidebar:
     contents:
       - index.ipynb
-      - 00_core-Copy1.ipynb
       - 00_core.ipynb
       - 01_zma_kegg_download.ipynb
+      - 02_zma_parse_kegg_gene_entries.ipynb
+      - 03_zma_parse_other.ipynb
