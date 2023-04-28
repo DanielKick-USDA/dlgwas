@@ -18,7 +18,9 @@ def ensure_dir_path_exists(dir_path = '../ext_data'):
 # Get all the genes for zea mays
 # Some gene entries that don't start begin with a chromosome number. These included plastid (Pltd) and mitochondria (MT) genes.
 
-def get_kegg_species_list(species = 'zma'):
+def get_kegg_species_list(species = 'zma' # KEGG species code for the desired list.
+                         ):
+    "Load or download a KEGG species list text file"
     import os
     import requests
     # make sure the directory exists to hold these data
@@ -37,7 +39,9 @@ def get_kegg_species_list(species = 'zma'):
     return(r_text)
 
 # %% ../nbs/01_zma_kegg_download.ipynb 7
-def mkdf_kegg_species_list(kegg_species_list = get_kegg_species_list(species = 'zma')):
+def mkdf_kegg_species_list(kegg_species_list # species list from KEGG retrieved using `get_kegg_species_list()`
+                          ):
+    "Produce a dataframe containing a KEGG species list."
     import pandas as pd
     kegg_list_zma = pd.DataFrame([e.split('\t') for e in kegg_species_list.split('\n') ])
     # clean up names
