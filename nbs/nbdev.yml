@@ -4,6 +4,6 @@ project:
 website:
   title: "dlgwas"
   site-url: "https://DanielKick-USDA.github.io/dlgwas"
-  description: "This project aims to prototype approaches to be used in fulfilling the aims proposed in the grant Environmentally Aware Deep Learning Based Genomic Selection And Management Optimization For Maize Yield"
+  description: "''"
   repo-branch: main
   repo-url: "https://github.com/DanielKick-USDA/dlgwas"
