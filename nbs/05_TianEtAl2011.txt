@@ -229,7 +229,15 @@ vals = df_to_ACGT(
 
 
 
+# save_path = '../models/'+nb_name+'/markers/'
 
+# for e in os.listdir(save_path):
+#     np.savez_compressed(save_path+e[0:-1]+'z',
+#                         np.load(save_path+e))
+
+# # np.savez_compressed('../models/'+nb_name+'/markers/test_zip.npz', vals[0, :, :])
+
+# numpy.savez_compressed
 
 # Loading and processing is the time consuming part. 
 save_path = '../models/'+nb_name+'/markers/'
@@ -238,7 +246,7 @@ ensure_dir_path_exists(save_path)
 n_samples = len(list(data['sample']))
 
 for i in  tqdm(range(n_samples)):
-    save_file_path = save_path+'m'+str(i)+'.npy'
+    save_file_path = save_path+'m'+str(i)+'.npz'
     if os.path.exists(save_file_path) == False:
         markers = pd.DataFrame(get_AGPv4(taxa = find_AGPv4(taxa = data['sample'][i])[0])[1:])    
 
@@ -248,7 +256,7 @@ for i in  tqdm(range(n_samples)):
             silent = True
         )
 
-        np.save(save_file_path, markers)
+        np.savez_compressed(save_file_path, markers)
 # 4683/4683 [59:54<00:00,  1.30it/s]
 
 # This should be done on as many samples as possible at one time. 
@@ -277,6 +285,48 @@ for i in  tqdm(range(n_samples)):
 # print('Saving.')
 # for i in tqdm(range(len(cached_markers))):
 #     np.save(save_path+'h'+cached_markers[i][1:], markers_hilbert[i])
+
+chunk_size = 500
+import math
+
+load_path = '../models/'+nb_name+'/markers/'
+save_path = '../models/'+nb_name+'/hilbert/'
+ensure_dir_path_exists(save_path)
+
+cached_markers = os.listdir(load_path)
+cached_hilbert_markers = os.listdir(save_path)
+# only process markers that haven't been transformed already
+cached_markers = [ee for ee in cached_markers if ee not in ['m'+e[1:] for e in cached_hilbert_markers]]
+
+n_chunks = math.ceil(len(cached_markers)/chunk_size)
+for ith_chunk in range(n_chunks):
+
+    print(str(ith_chunk)+'/'+str(n_chunks))
+    chunk_start = ith_chunk*chunk_size
+    chunk_stop = min((ith_chunk+1)*chunk_size, 
+                     len(cached_markers)+1 ) # Last chunk may not be evenly divisible
+
+
+    cached_marker_slice = cached_markers[chunk_start:chunk_stop]
+    # if need be, this can always be chunked. 
+    # process these as a large array for speed.
+    print('Applying Hilbert Transformation.')
+
+    markers_hilbert = np_3d_to_hilbert(
+        #                                                v--- zipped np arrays use position (arr_0, arr_1, ...) if no name is passed
+        in_seq = np.concatenate([np.load(load_path+e)['arr_0'] for e in cached_marker_slice ]) 
+    )
+
+    #then save each sample separately so they can be loaded as needed.
+    print('Saving.')
+    for i in tqdm(range(len(cached_marker_slice))):
+        np.savez_compressed(save_path+'h'+cached_marker_slice[i][1:-1]+'z', markers_hilbert[i])    
+
+
+
+
+
+
 
 # Useful for converting between the physical location and site
 AGPv4_site = pd.read_table('../data/zma/panzea/genotypes/GBS/v27/'+'ZeaGBSv27_publicSamples_imputedV5_AGPv4-181023_PositionList.txt')
@@ -342,35 +392,35 @@ y1 = data['leaf_length']
 y2 = data['leaf_width']
 y3 = data['upper_leaf_angle']
 
-# # Non-Hilbert Version
-# save_path = '../models/'+nb_name+'/markers/'
-# xs = np.zeros(shape = (len(y1), 943455, 4))
+# Non-Hilbert Version
+save_path = '../models/'+nb_name+'/markers/'
+xs = np.zeros(shape = (len(y1), 943455, 4))
 
-# failed_idxs = []
+failed_idxs = []
 
-# for i in tqdm(range(len(y1))):
-#     save_file_path = save_path+'m'+str(i)+'.npy'
-#     if os.path.exists(save_file_path):
-#         xs[i, :, :] = np.load(save_file_path)
-#     else:
-#         failed_idxs += [i]
-# if failed_idxs != []:
-#     print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
+for i in tqdm(range(len(y1))):
+    save_file_path = save_path+'m'+str(i)+'.npy'
+    if os.path.exists(save_file_path):
+        xs[i, :, :] = np.load(save_file_path)
+    else:
+        failed_idxs += [i]
+if failed_idxs != []:
+    print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
 
-# # Hilbert version
-# save_path = '../models/'+nb_name+'/hilbert/'
-# xs = np.zeros(shape = (len(y1), 1024, 1024, 4))
+# Hilbert version
+save_path = '../models/'+nb_name+'/hilbert/'
+xs = np.zeros(shape = (len(y1), 1024, 1024, 4))
 
-# failed_idxs = []
+failed_idxs = []
 
-# for i in tqdm(range(len(y1))):
-#     save_file_path = save_path+'h'+str(i)+'.npy'
-#     if os.path.exists(save_file_path):
-#         xs[i, :, :, :] = np.load(save_file_path)
-#     else:
-#         failed_idxs += [i]
-# if failed_idxs != []:
-#     print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
+for i in tqdm(range(len(y1))):
+    save_file_path = save_path+'h'+str(i)+'.npy'
+    if os.path.exists(save_file_path):
+        xs[i, :, :, :] = np.load(save_file_path)
+    else:
+        failed_idxs += [i]
+if failed_idxs != []:
+    print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
 
 
 def calc_cs(x): return [np.mean(x, axis = 0), np.std(x, axis = 0)]

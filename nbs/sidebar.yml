@@ -17,11 +17,14 @@ website:
       - 04_KEGG vis.html
       - 05_TianEtAl2011-Copy1.html
       - 05_TianEtAl2011.html
-      - 05_TianEtAl2011.ipynb
       - 05_zma_trial.html
       - 09_BucklerEtAl2009-Copy1.html
       - 09_BucklerEtAl2009.html
       - 09_BucklerEtAl2009.ipynb
       - 09_TianEtAl2011.html
+      - 10_TianEtAl2011.html
+      - 10_TianEtAl2011.ipynb
+      - 11_TianEtAl2011_model_simple.html
+      - 11_TianEtAl2011_model_simple.ipynb
       - Untitled.html
       - Untitled.ipynb
