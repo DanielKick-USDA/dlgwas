@@ -8,8 +8,20 @@ website:
       - 01_zma_kegg_download.html
       - 01_zma_kegg_download.ipynb
       - 02_zma_parse_kegg_gene_entries.html
-      - 02_zma_parse_other.ipynb
+      - 02_zma_parse_other.html
+      - 02_zma_retrieve_nucleotide_data.html
+      - 02_zma_retrieve_nucleotide_data.ipynb
       - 03_zma_parse_other.html
+      - 03_zma_trial.html
       - 03_zma_trial.ipynb
       - 04_KEGG vis.html
+      - 05_TianEtAl2011-Copy1.html
+      - 05_TianEtAl2011.html
+      - 05_TianEtAl2011.ipynb
       - 05_zma_trial.html
+      - 09_BucklerEtAl2009-Copy1.html
+      - 09_BucklerEtAl2009.html
+      - 09_BucklerEtAl2009.ipynb
+      - 09_TianEtAl2011.html
+      - Untitled.html
+      - Untitled.ipynb
