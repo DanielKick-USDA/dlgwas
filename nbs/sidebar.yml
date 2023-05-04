@@ -2,4 +2,14 @@ website:
   sidebar:
     contents:
       - index.ipynb
+      - index.html
+      - 00_core.html
       - 00_core.ipynb
+      - 01_zma_kegg_download.html
+      - 01_zma_kegg_download.ipynb
+      - 02_zma_parse_kegg_gene_entries.html
+      - 02_zma_parse_other.ipynb
+      - 03_zma_parse_other.html
+      - 03_zma_trial.ipynb
+      - 04_KEGG vis.html
+      - 05_zma_trial.html

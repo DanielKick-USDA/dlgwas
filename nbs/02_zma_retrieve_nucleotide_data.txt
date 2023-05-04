@@ -1,0 +1,353 @@
+#| default_exp dna
+
+# !cd ../ && pip install -e '.[dev]'
+
+import os
+
+import numpy as np
+import pandas as pd
+
+import plotly.express as px
+
+import hilbertcurve
+from hilbertcurve.hilbertcurve import HilbertCurve
+
+    # !conda install openpyxl -y
+    # ! conda install h5py -y
+# ! pip install hilbertcurve
+
+#| export
+
+def read_txt(path, 
+             **kwargs # Intended to allow for explicit 'encoding' to be passed into open the file
+            ):
+    if 'encoding' in kwargs.keys():
+        print(kwargs)
+        with open(path, 'r', encoding  = kwargs['encoding']) as f:
+            data = f.read()        
+    else:    
+        with open(path, 'r') as f:
+            data = f.read()
+            
+    return(data)
+
+#| export
+
+def print_txt(path):
+    print(read_txt(path = path))
+
+AGPv4_path = '../data/zma/panzea/genotypes/GBS/v27/'
+
+print_txt(path = AGPv4_path+'Readme')
+
+print_txt(path = AGPv4_path+'rename_all.sh')
+
+# Other than listing the taxa this isn't expected to be of much use for our purposes.
+AGPv4_taxa=pd.read_table(AGPv4_path+'ZeaGBSv27_publicSamples_imputedV5_AGPv4-181023_TaxaList.txt')
+AGPv4_taxa.head()
+
+# Useful for converting between the physical location and site
+AGPv4_site = pd.read_table(AGPv4_path+'ZeaGBSv27_publicSamples_imputedV5_AGPv4-181023_PositionList.txt')
+AGPv4_site.head()
+
+# The genomes are in a folder with an identical name as their source table
+table_directory = AGPv4_path+'ZeaGBSv27_publicSamples_imputedV5_AGPv4-181023_Table/'
+# Note however that the naming is altered to not use ':'
+os.listdir(table_directory)[0:3]
+
+#| export
+
+def taxa_to_filename(taxa = '05-397:250007467'): return(taxa.replace(':', '__'))
+
+taxa_to_filename(taxa = '05-397:250007467')
+
+#| export
+
+def find_AGPv4(
+    taxa, # should be the desired taxa or a regex fragment (stopping before the __). E.g. 'B73' or 'B\d+'
+    **kwargs # optionally pass in a genome list (this allows for a different path or precomputing if we're finding a lot of genomes)
+    ):
+    "Search for existing marker sets __"
+    if 'genome_files' not in kwargs.keys():
+        import os
+        genome_files = os.listdir(
+    '../data/zma/panzea/genotypes/GBS/v27/ZeaGBSv27_publicSamples_imputedV5_AGPv4-181023_Table/')
+    else:
+        genome_files = kwargs['genome_files']
+    import re
+    return( [e for e in genome_files if re.match(taxa+'__.+', e)] )
+
+
+
+#| export
+
+def get_AGPv4( 
+    taxa,
+    **kwargs 
+    ):
+    "Retrieve an existing marker set"
+    if 'table_directory' not in kwargs.keys():
+        table_directory = '../data/zma/panzea/genotypes/GBS/v27/ZeaGBSv27_publicSamples_imputedV5_AGPv4-181023_Table/'
+    else:
+        table_directory = kwargs['table_directory']
+        
+    with open(table_directory+taxa, 'r') as f:
+        data = f.read()    
+    data = data.split('\t')
+    return(data)
+
+
+
+# def get_AGPv4( 
+#     taxa,
+#     table_directory = '../data/zma/panzea/genotypes/GBS/v27/ZeaGBSv27_publicSamples_imputedV5_AGPv4-181023_Table/'
+# ):
+#     with open(table_directory+taxa, 'r') as f:
+#         data = f.read()    
+#     data = data.split('\t')
+#     return(data)
+
+get_AGPv4('05-397__250007467')[0:4]
+
+get_AGPv4(taxa = 'taxa')[0:4]
+
+len(get_AGPv4(taxa = 'taxa')), AGPv4_site.shape
+
+ith_taxa = '05-397:250007467'
+res = get_AGPv4(taxa_to_filename(taxa = ith_taxa))   # Retrieve record
+temp = AGPv4_site.loc[:, ['Chromosome', 'Position']]  
+temp[res[0]] = res[1:]                               # Add Col. with Nucleotides
+temp.head()
+
+mask = (temp.Chromosome == 1)
+
+temp_pos = temp.loc[mask, ['Position']]
+
+temp_pos['Shift'] = 0
+temp_pos.loc[1: , ['Shift']] = np.array(temp_pos.Position)[:-1]
+temp_pos['Diff'] = temp_pos['Position'] - temp_pos['Shift']
+
+temp_pos.loc[0, 'Diff'] = None
+
+temp_pos
+
+# px.histogram(temp_pos, x = 'Diff')
+
+res = get_AGPv4(taxa_to_filename(taxa = '05-397:250007467')) 
+res = res[1:] # drop taxa
+
+#| export
+
+def list_to_ACGT(
+    in_seq, # This should be a list with strings corresponding to IUPAC codes e.g. ['A', 'C', 'Y']
+    progress = False
+):
+    import numpy as np
+    import tqdm 
+    from tqdm import tqdm
+
+    # Convert IUPAC codes into pr ACGT -------------------------------------------
+    encode_dict = {
+        #     https://www.bioinformatics.org/sms/iupac.html
+        #     A     C     G     T
+        'A': [1,    0,    0,    0   ],
+        'C': [0,    1,    0,    0   ],
+        'G': [0,    0,    1,    0   ],
+        'T': [0,    0,    0,    1   ],
+        'K': [0,    0,    0.5,  0.5 ],
+        'M': [0.5,  0.5,  0,    0   ],
+        'N': [0.25, 0.25, 0.25, 0.25],
+        'R': [0.5,  0,    0.5,  0   ],
+        'S': [0,    0.5,  0.5,  0   ],
+        'W': [0.5,  0,    0,    0.5 ],
+        'Y': [0,    0.5,  0,    0.5 ],
+        #     Other values (assumed empty)
+        #     A     C     G     T
+         '': [0,    0,    0,    0   ],
+        '-': [0,    0,    0,    0   ],
+        '0': [0,    0,    0,    0   ],
+    }
+
+
+    # Cleanup -- 
+    # Any newlines need to be removed
+    in_seq = [e.replace('\n', '') for e in in_seq]
+
+    # Check if there's anything that should be in the dictionary but is not.
+    not_in_dict = [e for e in list(set(in_seq)) if e not in list(encode_dict.keys())]
+
+    if not_in_dict != []:
+        print("Waring: The following are not in the encoding dictionary and will be set as missing.\n"+str(not_in_dict))
+
+    in_seq = [e if e not in not_in_dict else '' for e in in_seq] 
+
+    # output matrix
+    GMat = np.zeros(shape = [len(in_seq), 4])
+
+    # convert all nucleotides to probabilities
+    if progress == True:
+        for nucleotide in tqdm(encode_dict.keys()):
+            mask = [True if e == nucleotide else False for e in  in_seq]
+            GMat[mask, :] = encode_dict[nucleotide]    
+    else:
+        for nucleotide in encode_dict.keys():
+            mask = [True if e == nucleotide else False for e in  in_seq]
+            GMat[mask, :] = encode_dict[nucleotide]
+
+    return(GMat)
+
+
+res = list_to_ACGT(in_seq = res)
+res = res[0:1000]
+
+res.shape
+
+
+
+
+
+
+
+
+
+#| export
+
+def calc_needed_hilbert_p(n_needed = 1048576,
+                          max_p = 20):
+    out = None
+    for i in range(1, max_p):
+        if 4**i > n_needed:
+            out = i
+            break
+    return(out)
+
+
+
+
+
+
+
+
+
+#| export
+
+def np_2d_to_hilbert(
+    in_seq # This should be a 2d numpy array with dimensions of [sequence, channels] 
+):
+    import numpy as np
+    import tqdm
+    from tqdm import tqdm
+    
+    import hilbertcurve
+    from hilbertcurve.hilbertcurve import HilbertCurve
+    
+    import dlgwas
+    from dlgwas.dna import calc_needed_hilbert_p
+    
+    n_snps = in_seq.shape[0]
+    n_channels = in_seq.shape[-1]
+    temp = in_seq
+
+    p_needed = calc_needed_hilbert_p(n_needed=n_snps)
+    
+    # Data represented need not be continuous -- it need only have int positions
+    # a sequence or a sequence with gaps can be encoded
+    hilbert_curve = HilbertCurve(
+        p = p_needed, # iterations i.e. hold 4^p positions
+        n = 2    # dimensions
+        )
+
+    points = hilbert_curve.points_from_distances(range(n_snps))
+
+    dim_0 = np.max(np.array(points)[:, 0])+1 # add 1 to account for 0 indexing
+    dim_1 = np.max(np.array(points)[:, 1])+1
+    temp_mat = np.zeros(shape = [dim_0, dim_1, n_channels])
+    temp_mat[temp_mat == 0] = np.nan         #  empty values being used for visualization
+
+    for i in tqdm(range(n_snps)):
+        temp_mat[points[i][0], points[i][1], :] = temp[i]
+
+    return(temp_mat)
+
+#| export
+def np_3d_to_hilbert(
+    in_seq # This should be a 3d numpy array with dimensions of [samples, sequence, channels] 
+):
+    "This is the 3d version of `np_2d_to_hilbert`. The goal is to process all of the samples of an array in one go."
+    import numpy as np
+    import tqdm
+    from tqdm import tqdm
+    
+    import hilbertcurve
+    from hilbertcurve.hilbertcurve import HilbertCurve
+
+    import dlgwas
+    from dlgwas.dna import calc_needed_hilbert_p
+    
+    n_snps = in_seq.shape[1]
+    n_channels = in_seq.shape[-1]
+    temp = in_seq
+
+    p_needed = calc_needed_hilbert_p(n_needed=n_snps)
+    
+    # Data represented need not be continuous -- it need only have int positions
+    # a sequence or a sequence with gaps can be encoded
+    hilbert_curve = HilbertCurve(
+        p = p_needed, # iterations i.e. hold 4^p positions
+        n = 2    # dimensions
+        )
+
+    points = hilbert_curve.points_from_distances(range(n_snps))
+
+    dim_0 = np.max(np.array(points)[:, 0])+1 # add 1 to account for 0 indexing
+    dim_1 = np.max(np.array(points)[:, 1])+1
+    temp_mat = np.zeros(shape = [in_seq.shape[0], dim_0, dim_1, n_channels])
+    temp_mat[temp_mat == 0] = np.nan         #  empty values being used for visualization
+
+    for i in tqdm(range(n_snps)):
+        temp_mat[:,                          # sample
+                 points[i][0], points[i][1], # x, y
+                 :] = temp[:, i]             # channels
+
+    return(temp_mat)
+
+demo = np_2d_to_hilbert(
+    in_seq = np.asarray([np.linspace(1, 100, num= 50),
+                         np.linspace(100, 1, num= 50)]).T
+)
+
+px.imshow(demo[:,:,0])
+
+px.imshow(demo[:,:,1])
+
+
+
+taxa_to_filename(taxa = '05-397:250007467')
+
+find_AGPv4(taxa = '05-397')
+
+res = get_AGPv4(taxa_to_filename(taxa = '05-397:250007467')) 
+res = res[1:] # drop taxa
+res[0:10]
+
+res = list_to_ACGT(in_seq = res)
+res = res[0:1000]
+res
+
+# This will happen under the hood
+# calc_needed_hilbert_p(n_needed=res.shape[0])
+res_hilb = np_2d_to_hilbert(
+    in_seq = res
+)
+
+
+px.imshow( res[0:20, 0:1] )
+
+px.imshow( res_hilb[:, :, 0] )
+
+px.imshow( res_hilb[:, :, 1] )
+
+#| hide
+import nbdev; nbdev.nbdev_export()
+
+

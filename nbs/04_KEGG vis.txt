@@ -1,0 +1,110 @@
+import pickle as pkl
+import plotly.express as px
+
+
+
+
+
+save_dir = '../data/zma/kegg/'
+
+# Reading in data
+with open(save_dir+'/kegg_gene_entries.pkl', 'rb') as handle:
+    kegg_gene_entries = pkl.load(handle)
+
+kegg_gene_entries
+
+
+
+# Restrict to only those with pathway
+kegg_gene_brite = [e for e in kegg_gene_entries if 'BRITE' in e.keys()]
+
+
+import pandas as pd
+
+i = 0
+is_list = []
+for i in range(len(kegg_gene_brite)):
+    js_list = []
+    for j in range(len(kegg_gene_brite[i]['BRITE']['BRITE_PATHS'])): 
+        entries_path = kegg_gene_brite[i]['BRITE']['BRITE_PATHS'][j]
+        if entries_path != []:
+        
+            temp = pd.DataFrame(entries_path)
+            temp = temp.T
+            temp['ENTRY'] = kegg_gene_brite[i]['ENTRY']+'_'+str(j)
+            
+            js_list = js_list + [temp]
+            
+    if js_list != []:
+        is_list = is_list + [pd.concat(js_list)]
+    
+
+# is_list
+
+BRITE_df = pd.concat(is_list)
+
+BRITE_df = BRITE_df.drop_duplicates().reset_index().drop(columns = 'index')
+BRITE_df
+
+
+
+# BRITE_df.loc[BRITE_df.`0` == ]
+
+BRITE_plt = BRITE_df.loc[0:100, :]
+BRITE_df['a'] = 1
+
+import plotly.express as px
+#TODO find out what is causing levels deeper than 3 or the indices below (and others) to fail
+
+
+fig = px.treemap(BRITE_df.loc[:
+#     (
+#     (BRITE_df.index != 7480) &
+#     (BRITE_df.index != 8131) &
+#     (BRITE_df.index != 8838) &
+#     (BRITE_df.index != 8837) &
+#     (BRITE_df.index != 8836)
+# )
+    , :], path=[px.Constant("all"), 0, 1, 2, 3, #4, 5, 6
+            ], 
+#                  values='a'
+                )
+fig.update_traces(root_color="lightgrey")
+fig.update_layout(margin = dict(t=50, l=25, r=25, b=25))
+fig.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
