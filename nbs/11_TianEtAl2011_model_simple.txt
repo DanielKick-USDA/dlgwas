@@ -10,8 +10,6 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from torch import nn
 
-# TODO fixme
-
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if use_gpu_num in [0, 1]: 
     torch.cuda.set_device(use_gpu_num)
@@ -22,83 +20,39 @@ from tqdm import tqdm
 
 import plotly.graph_objects as go
 import plotly.express as px
+import plotly.io as pio
+pio.templates.default = "plotly_white"
 
-# [e for e in os.listdir() if re.match(".+\\.txt", e)]
 
 import dlgwas
-# from dlgwas.dna import *
-
 from dlgwas.kegg import ensure_dir_path_exists
 from dlgwas.kegg import get_cached_result
 from dlgwas.kegg import put_cached_result
 
+from dlgwas.dlfn import calc_cs
+from dlgwas.dlfn import apply_cs
+from dlgwas.dlfn import reverse_cs
+
+
+
+
+
 # set up directory for notebook artifacts
-# nb_name = '11_TianEtAl2011'
-# ensure_dir_path_exists(dir_path = '../models/'+nb_name)
-# ensure_dir_path_exists(dir_path = '../reports/'+nb_name)
+nb_name = '11_TianEtAl2011'
 
-with open('../ext_data/zma/panzea/phenotypes/Tian_etal_2011_NatGen_leaf_pheno_data-110221/Tian_etal_2011_NatGen_readme.txt', 
-          'r') as f:
-    dat = f.read()
-print(dat)
+# import shutil
+# # to rerun from scratch:
+# shutil.rmtree('../models/'+nb_name, ignore_errors=True)
+# shutil.rmtree('../reports/'+nb_name, ignore_errors=True)
 
-data = pd.read_excel('../ext_data/zma/panzea/phenotypes/Tian_etal_2011_NatGen_leaf_pheno_data-110221/Tian_etal2011NatGenet.leaf_trait_phenotype.xlsx')
-data
+ensure_dir_path_exists(dir_path = '../models/'+nb_name)
+ensure_dir_path_exists(dir_path = '../reports/'+nb_name)
 
-samples = list(set(data['sample']))
-
-# this can take a while to calculate so it's worth cacheing
-save_path = '../models/10_TianEtAl2011/samples_and_matches.pkl'
-
-samples_and_matches = get_cached_result(save_path=save_path)
-
-samples_one_match = [e for e in samples_and_matches if len(e['matches']) == 1]
-
-print("Warning: "+str(len(samples_and_matches)-len(samples_one_match)
-    )+" samples ("+str(round(100*((len(samples_and_matches)-len(samples_one_match))/len(samples_and_matches))) 
-    )+"%) have zero matches or more than one match in AGPv4. The first is being used.")
-
-original_rows = data.shape[0]
-
-# mask to restrict to only those samples with one or more GBS marker set in AGPv4
-mask = [True if e in [e1['sample'] for e1 in 
-                      [e for e in samples_and_matches if len(e['matches']) >= 1]
-              ] else False for e in data['sample'] ]
-data = data.loc[mask,].reset_index().drop(columns = 'index')
-print(str(original_rows - data.shape[0])+' rows dropped.')
-
-# Useful for converting between the physical location and site
-AGPv4_site = pd.read_table('../data/zma/panzea/genotypes/GBS/v27/'+'ZeaGBSv27_publicSamples_imputedV5_AGPv4-181023_PositionList.txt')
-AGPv4_site.head()
-
-taxa_groupings = pd.read_table('../data/zma/panzea/genotypes/GBS/v27/ZeaGBSv27_publicSamples_imputedV5_AGPv4-181023_TaxaList.txt')
-taxa_groupings = taxa_groupings.loc[:, ['Taxa', 'Tassel4SampleName', 'Population']]
-
-taxa_groupings[['sample', 'sample2']] = taxa_groupings['Taxa'].str.split(':', expand = True)
-
-taxa_groupings = taxa_groupings.loc[:, ['sample', 'Population']].drop_duplicates()
-
-# Restrict to those in data
-taxa_groupings = data[['sample']].merge(taxa_groupings, how = 'left')
-taxa_groupings
-
-temp = [e for e in list(set(taxa_groupings.Population))]
-temp.sort()
-temp
-
-
-
-temp = taxa_groupings.copy()
-temp['sample'] = 1
-
-fig = px.treemap(temp, 
-                 path=[px.Constant("All Populations:"), 'Population'], values='sample')
-# fig.update_traces(root_color="lightgrey")
-# fig.update_layout(margin = dict(t=50, l=25, r=25, b=25))
-fig.show()
+# Read in cleaned data
+taxa_groupings = pd.read_csv('../models/10_TianEtAl2011/taxa_groupings.csv')
+data           = pd.read_csv('../models/10_TianEtAl2011/clean_data.csv')
 
 # Define holdout sets (Populations)
-
 uniq_pop = list(set(taxa_groupings['Population']))
 print(str(len(uniq_pop))+" Unique Holdout Groups.")
 taxa_groupings['Holdout'] = None
@@ -108,12 +62,38 @@ for i in range(len(uniq_pop)):
 
 taxa_groupings
 
-Holdout_Int = 0
-print("Holding out: "+uniq_pop[Holdout_Int])
+#randomly holdout a population if there is not a file with the population held out.
+# Holdout_Int = 0
+Holdout_Int_path = '../models/'+nb_name+'/holdout_pop_int.pkl'
+if None != get_cached_result(Holdout_Int_path):
+    Holdout_Int = get_cached_result(Holdout_Int_path)
+else:
+    Holdout_Int = int(np.random.choice([i for i in range(len(uniq_pop))], 1))
+    put_cached_result(Holdout_Int_path, Holdout_Int)
+
+
+print("Holding out i="+str(Holdout_Int)+": "+uniq_pop[Holdout_Int])
 
 mask = (taxa_groupings['Holdout'] == Holdout_Int)
 train_idxs = list(taxa_groupings.loc[~mask, ].index)
 test_idxs = list(taxa_groupings.loc[mask, ].index)
+
+[len(e) for e in [test_idxs, train_idxs]]
+
+downsample_obs = True
+train_n = 900
+test_n = 100
+
+
+if downsample_obs == True:
+    train_idxs = np.random.choice(train_idxs, train_n)
+    test_idxs = np.random.choice(test_idxs, test_n)
+    print([len(e) for e in [test_idxs, train_idxs]])
+
+
+
+# used to go from index in tensor to index in data so that the right xs tensor can be loaded in
+idx_original = np.array(data.index)
 
 y1 = data['leaf_length']
 y2 = data['leaf_width']
@@ -121,41 +101,6 @@ y3 = data['upper_leaf_angle']
 y1 = np.array(y1)
 y2 = np.array(y2)
 y3 = np.array(y3)
-
-# Non-Hilbert Version
-save_path = '../models/10_TianEtAl2011/markers/'
-xs = np.zeros(shape = (len(y1), 943455, 4))
-
-failed_idxs = []
-
-for i in tqdm(range(len(y1))):
-    save_file_path = save_path+'m'+str(i)+'.npz'
-    if os.path.exists(save_file_path):
-        xs[i, :, :] = np.load(save_file_path)['arr_0']
-    else:
-        failed_idxs += [i]
-if failed_idxs != []:
-    print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
-
-# # Hilbert version
-# save_path = '../models/'+nb_name+'/hilbert/'
-# xs = np.zeros(shape = (len(y1), 1024, 1024, 4))
-
-# failed_idxs = []
-
-# for i in tqdm(range(len(y1))):
-#     save_file_path = save_path+'h'+str(i)+'.npy'
-#     if os.path.exists(save_file_path):
-#         xs[i, :, :, :] = np.load(save_file_path)
-#     else:
-#         failed_idxs += [i]
-# if failed_idxs != []:
-#     print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
-
-
-def calc_cs(x): return [np.mean(x, axis = 0), np.std(x, axis = 0)]
-
-def apply_cs(xs, cs_dict_entry): return ((xs - cs_dict_entry[0]) / cs_dict_entry[0])
 
 scale_dict = {
     'y1':calc_cs(y1[train_idxs]),
@@ -167,74 +112,507 @@ y1 = apply_cs(y1, scale_dict['y1'])
 y2 = apply_cs(y2, scale_dict['y2'])
 y3 = apply_cs(y3, scale_dict['y3'])
 
-# Running the below seems to crash the session.
 
-# Need to process the below without crashing the session.
-# - Cycle data on and off gpu
-#     - http://localhost:8895/notebooks/GenomeExplore/notebooks/snps_modeling.ipynb
-# - Premake matricies and only load in np arrays
-# - Possibly *read* in data from disk. Look at image processing for ideas.
 
-# y1_train = torch.from_numpy(y1[train_idxs])[:, None]#.to(device).float()
-# y2_train = torch.from_numpy(y2[train_idxs])[:, None]#.to(device).float()
-# y3_train = torch.from_numpy(y3[train_idxs])[:, None]#.to(device).float()
-# xs_train = torch.from_numpy(xs[train_idxs])#.to(device).float()
+# loading this into memory causes the session to crash
 
-# y1_test = torch.from_numpy(y1[test_idxs])[:, None]#.to(device).float()
-# y2_test = torch.from_numpy(y2[test_idxs])[:, None]#.to(device).float()
-# y3_test = torch.from_numpy(y3[test_idxs])[:, None]#.to(device).float()
-# xs_test = torch.from_numpy(xs[test_idxs])#.to(device).float()
+y1_train = torch.from_numpy(y1[train_idxs])[:, None]
+y2_train = torch.from_numpy(y2[train_idxs])[:, None]
+y3_train = torch.from_numpy(y3[train_idxs])[:, None]
+
+idx_original_train = torch.from_numpy(idx_original[train_idxs])
 
 
 
-# class CustomDataset(Dataset):
-#     def __init__(self, y1, y2, y3, xs, transform = None, target_transform = None):
-#         self.y1 = y1
-#         self.y2 = y2
-#         self.y3 = y3
+y1_test = torch.from_numpy(y1[test_idxs])[:, None]
+y2_test = torch.from_numpy(y2[test_idxs])[:, None]
+y3_test = torch.from_numpy(y3[test_idxs])[:, None]
+
+idx_original_test = torch.from_numpy(idx_original[test_idxs])
+
+
+
+class CustomDataset(Dataset):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if use_gpu_num in [0, 1]: 
+        torch.cuda.set_device(use_gpu_num)
+    print(f"Using {device} device")
+    
+    def __init__(self, y1, y2, y3, #xs, 
+                 idx_original,
+                 
+                 transform = None, target_transform = None):
+        self.y1 = y1
+        self.y2 = y2
+        self.y3 = y3
 #         self.xs = xs
-#         self.transform = transform
-#         self.target_transform = target_transform    
+        self.idx_original = idx_original
+        self.transform = transform
+        self.target_transform = target_transform    
     
-#     def __len__(self):
-#         return len(self.y1)
+    def __len__(self):
+        return len(self.y1)
     
-#     def __getitem__(self, idx):
-#         y1_idx = self.y1[idx]
-#         y2_idx = self.y2[idx]
-#         y3_idx = self.y3[idx]
-#         xs_idx = self.xs[idx]
+    def __getitem__(self, idx):
+        y1_idx = self.y1[idx].to(device).float()
+        y2_idx = self.y2[idx].to(device).float()
+        y3_idx = self.y3[idx].to(device).float()
         
-#         if self.transform:
-#             xs_idx = self.transform(xs_idx)
+        
+        # Change type of xs loaded !! ----------------------------------------
+        # load in xs as they are needed.
+        # Non-Hilbert Version
+        save_path = '../models/10_TianEtAl2011/markers/'
+        # Hilbert version
+        # save_path = '../models/'+nb_name+'/hilbert/'
+        save_file_path = save_path+'m'+str(int(self.idx_original[idx]))+'.npz'
+        xs_idx = np.load(save_file_path)['arr_0']
+        xs_idx = torch.from_numpy(xs_idx).to(device).float()
+        xs_idx = xs_idx.squeeze()
+        
+        if self.transform:
+            xs_idx = self.transform(xs_idx)
             
-#         if self.target_transform:
-#             y1_idx = self.transform(y1_idx)
-#             y2_idx = self.transform(y2_idx)
-#             y3_idx = self.transform(y3_idx)
-#         return xs_idx, y1_idx, y2_idx, y3_idx
+        if self.target_transform:
+            y1_idx = self.transform(y1_idx)
+            y2_idx = self.transform(y2_idx)
+            y3_idx = self.transform(y3_idx)
+        return xs_idx, y1_idx, y2_idx, y3_idx
 
-# training_dataloader = DataLoader(
-#     CustomDataset(
-#         y1 = y1_train,
-#         y2 = y2_train,
-#         y3 = y3_train,
-#         xs = xs_train
-#     ), 
-#     batch_size = 64, 
-#     shuffle = True)
+training_dataloader = DataLoader(
+    CustomDataset(
+        y1 = y1_train,
+        y2 = y2_train,
+        y3 = y3_train,
+        idx_original = idx_original_train
+    ), 
+    batch_size = 64, 
+    shuffle = True)
 
-# testing_dataloader = DataLoader(
-#     CustomDataset(
-#         y1 = y1_test,
-#         y2 = y2_test,
-#         y3 = y3_test,
-#         xs = xs_test
-#     ), 
-#     batch_size = 64, 
-#     shuffle = True)
+testing_dataloader = DataLoader(
+    CustomDataset(
+        y1 = y1_test,
+        y2 = y2_test,
+        y3 = y3_test,
+        idx_original = idx_original_train
+    ), 
+    batch_size = 64, 
+    shuffle = True)
 
-# xs.shape
+xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
+
+# del training_dataloader
+
+# torch.cuda.empty_cache()
+
+xs_i.shape
+
+class NeuralNetwork(nn.Module):
+    def __init__(self):
+        super(NeuralNetwork, self).__init__()    
+        self.x_network = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(3773820, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+        
+    def forward(self, x):
+        x_out = self.x_network(x)
+        return x_out
+
+model = NeuralNetwork().to(device)
+# print(model)
+
+
+
+model(xs_i)[0:3] # try prediction on one batch
+
+def train_loop(dataloader, model, loss_fn, optimizer, silent = False):
+    size = len(dataloader.dataset)
+    for batch, (xs_i, y1_i, y2_i, y3_i) in enumerate(dataloader):
+        # Compute prediction and loss
+        pred = model(xs_i)
+        loss = loss_fn(pred, y1_i) # <----------------------------------------
+
+        # Backpropagation
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if batch % 100 == 0:
+            loss, current = loss.item(), batch * len(y1_i) # <----------------
+            if not silent:
+                print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+
+                
+def train_error(dataloader, model, loss_fn, silent = False):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    train_loss = 0
+
+    with torch.no_grad():
+        for xs_i, y1_i, y2_i, y3_i in dataloader:
+            pred = model(xs_i)
+            train_loss += loss_fn(pred, y1_i).item() # <----------------------
+            
+    train_loss /= num_batches
+    return(train_loss) 
+
+            
+def test_loop(dataloader, model, loss_fn, silent = False):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    test_loss = 0
+
+    with torch.no_grad():
+        for xs_i, y1_i, y2_i, y3_i in dataloader:
+            pred = model(xs_i)
+            test_loss += loss_fn(pred, y1_i).item() # <-----------------------
+
+    test_loss /= num_batches
+    if not silent:
+        print(f"Test Error: Avg loss: {test_loss:>8f}")
+    return(test_loss) 
+
+def train_nn(
+    training_dataloader,
+    testing_dataloader,
+    model,
+    learning_rate = 1e-3,
+    batch_size = 64,
+    epochs = 500
+):
+    # Initialize the loss function
+    loss_fn = nn.MSELoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+
+    loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
+    loss_df['TrainMSE'] = np.nan
+    loss_df['TestMSE']  = np.nan
+
+    for t in tqdm(range(epochs)):        
+#         print(f"Epoch {t+1}\n-------------------------------")
+        train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
+
+        loss_df.loc[loss_df.index == t, 'TrainMSE'
+                   ] = train_error(training_dataloader, model, loss_fn, silent = True)
+        
+        loss_df.loc[loss_df.index == t, 'TestMSE'
+                   ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
+        
+        if (t+1)%10: # Cache in case training is interupted
+#             print(loss_df.loc[loss_df.index == t, ['TrainMSE', 'TestMSE']])
+            torch.save(model.state_dict(), 
+                       '../models/'+nb_name+'/model_'+str(t)+'_'+str(epochs)+'.pt') # convention is to use .pt or .pth
+        
+    return([model, loss_df])
+
+# don't run if either of these exist because there may be cases where we want the results but not the model
+
+if not os.path.exists('../models/'+nb_name+'/model.pt'): 
+
+    model, loss_df = train_nn(
+        training_dataloader,
+        testing_dataloader,
+        model,
+        learning_rate = 1e-3,
+        batch_size = 64,
+        epochs = 20
+    )
+    
+    # experimental outputs:
+    # 1. Model
+    torch.save(model.state_dict(), '../models/'+nb_name+'/model.pt') # convention is to use .pt or .pth
+
+    # 2. loss_df
+    loss_df.to_csv('../reports/'+nb_name+'/loss_df.csv', index=False)  
+
+# model, loss_df = train_nn(
+#     training_dataloader,
+#     testing_dataloader,
+#     model,
+#     learning_rate = 1e-3,
+#     batch_size = 64,
+#     epochs = 1
+# )
+
+# # don't run if either of these exist because there may be cases where we want the results but not the model
+# #| os.path.exists('../reports/'+nb_name+'/loss_df.csv')
+
+# if not os.path.exists('../models/'+nb_name+'/model.pt'): 
+
+#     model, loss_df = train_nn(
+#         training_dataloader,
+#         testing_dataloader,
+#         model,
+#         learning_rate = 1e-3,
+#         batch_size = 64,
+#         epochs = 250
+#     )
+    
+#     # experimental outputs:
+#     # 1. Model
+#     torch.save(model.state_dict(), '../models/'+nb_name+'/model.pt') # convention is to use .pt or .pth
+
+#     # 2. loss_df
+#     loss_df.to_csv('../reports/'+nb_name+'/loss_df.csv', index=False)
+    
+
+
+
+# This uses 6650/8192 MiB Available
+# Perhaps by using a larger batch size we can increase the used amount.
+# Increasing the size of the model will require more memory so this should be monitored.
+
+# for one iteration it takes 1/1 [04:28<00:00, 268.24s/it]
+# NeuralNetwork(
+#   (x_network): Sequential(
+#     (0): Flatten(start_dim=1, end_dim=-1)
+#     (1): Linear(in_features=3773820, out_features=64, bias=True)
+#     (2): BatchNorm1d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+#     (3): ReLU()
+#     (4): Linear(in_features=64, out_features=1, bias=True)
+#   )
+# )
+
+#     45/500 [3:22:20<34:19:22, 271.57s/it]
+
+loss_df = pd.read_csv('../reports/'+nb_name+'/loss_df.csv')
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
+                    mode='lines', name='Train'))
+fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
+                    mode='lines', name='Test'))
+fig.show()
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=loss_df.Epoch, 
+                         y= reverse_cs(loss_df.TrainMSE, 
+                                       scale_dict['y1']),
+                         mode='lines', name='Train'))
+fig.add_trace(go.Scatter(x=loss_df.Epoch, 
+                         y= reverse_cs(loss_df.TestMSE, 
+                                       scale_dict['y1']),
+                         mode='lines', name='Test'))
+fig.show()
+
+
+
+
+
+
+
+# # ! conda install captum -c pytorch -y
+
+
+# # imports from captum library
+# from captum.attr import LayerConductance, LayerActivation, LayerIntegratedGradients
+# from captum.attr import IntegratedGradients, DeepLift, GradientShap, NoiseTunnel, FeatureAblation
+
+
+
+# ig = IntegratedGradients(model)
+# ig_nt = NoiseTunnel(ig)
+# dl = DeepLift(model)
+# gs = GradientShap(model)
+# fa = FeatureAblation(model)
+
+# ig_attr_test = ig.attribute(xs_test, n_steps=50)
+# ig_nt_attr_test = ig_nt.attribute(xs_test)
+# dl_attr_test = dl.attribute(xs_test)
+# gs_attr_test = gs.attribute(xs_test, xs_train)
+# fa_attr_test = fa.attribute(xs_test)
+
+# [e.shape for e in [ig_attr_test,
+# ig_nt_attr_test,
+# dl_attr_test,
+# gs_attr_test,
+# fa_attr_test]]
+
+# fig = go.Figure()
+# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
+#                          y = ig_nt_attr_test.cpu().detach().numpy().mean(axis=0),
+#                          mode='lines', name='Test'))
+# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
+#                          y = dl_attr_test.cpu().detach().numpy().mean(axis=0),
+#                          mode='lines', name='Test'))
+# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
+#                          y = gs_attr_test.cpu().detach().numpy().mean(axis=0),
+#                          mode='lines', name='Test'))
+# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
+#                          y = fa_attr_test.cpu().detach().numpy().mean(axis=0),
+#                          mode='lines', name='Test'))
+# fig.show()
+
+# len(dl_attr_test.cpu().detach().numpy().mean(axis = 0))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ## Version 2, Predict `y1` (Anthesis), `y2` (Silking), and `y3` (ASI)
+
+# Here each model will predict 3 values. The loss function is still mse, but the y tensors are concatenated
+
+# class NeuralNetwork(nn.Module):
+#     def __init__(self):
+#         super(NeuralNetwork, self).__init__()    
+#         self.x_network = nn.Sequential(
+#             nn.Linear(1106, 64),
+#             nn.BatchNorm1d(64),
+#             nn.ReLU(),
+#             nn.Linear(64, 3))
+        
+#     def forward(self, x):
+#         x_out = self.x_network(x)
+#         return x_out
+
+# model = NeuralNetwork().to(device)
+# # print(model)
+
+# xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
+# model(xs_i).shape # try prediction on one batch
+
+
+
+
+
+# def train_loop(dataloader, model, loss_fn, optimizer, silent = False):
+#     size = len(dataloader.dataset)
+#     for batch, (xs_i, y1_i, y2_i, y3_i) in enumerate(dataloader):
+#         # Compute prediction and loss
+#         pred = model(xs_i)
+#         loss = loss_fn(pred, torch.concat([y1_i, y2_i, y3_i], axis = 1)) # <----------------------------------------
+
+#         # Backpropagation
+#         optimizer.zero_grad()
+#         loss.backward()
+#         optimizer.step()
+
+#         if batch % 100 == 0:
+#             loss, current = loss.item(), batch * len(y1_i) # <----------------
+#             if not silent:
+#                 print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+
+                
+# def train_error(dataloader, model, loss_fn, silent = False):
+#     size = len(dataloader.dataset)
+#     num_batches = len(dataloader)
+#     train_loss = 0
+
+#     with torch.no_grad():
+#         for xs_i, y1_i, y2_i, y3_i in dataloader:
+#             pred = model(xs_i)
+#             train_loss += loss_fn(pred, torch.concat([y1_i, y2_i, y3_i], axis = 1)).item() # <----------------------
+            
+#     train_loss /= num_batches
+#     return(train_loss) 
+
+            
+# def test_loop(dataloader, model, loss_fn, silent = False):
+#     size = len(dataloader.dataset)
+#     num_batches = len(dataloader)
+#     test_loss = 0
+
+#     with torch.no_grad():
+#         for xs_i, y1_i, y2_i, y3_i in dataloader:
+#             pred = model(xs_i)
+#             test_loss += loss_fn(pred, torch.concat([y1_i, y2_i, y3_i], axis = 1)).item() # <-----------------------
+
+#     test_loss /= num_batches
+#     if not silent:
+#         print(f"Test Error: Avg loss: {test_loss:>8f}")
+#     return(test_loss) 
+
+
+# def train_nn(
+#     training_dataloader,
+#     testing_dataloader,
+#     model,
+#     learning_rate = 1e-3,
+#     batch_size = 64,
+#     epochs = 500
+# ):
+#     # Initialize the loss function
+#     loss_fn = nn.MSELoss()
+#     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+
+#     loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
+#     loss_df['TrainMSE'] = np.nan
+#     loss_df['TestMSE']  = np.nan
+
+#     for t in tqdm.tqdm(range(epochs)):
+#         # print(f"Epoch {t+1}\n-------------------------------")
+#         train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
+
+#         loss_df.loc[loss_df.index == t, 'TrainMSE'
+#                    ] = train_error(training_dataloader, model, loss_fn, silent = True)
+        
+#         loss_df.loc[loss_df.index == t, 'TestMSE'
+#                    ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
+        
+#     return([model, loss_df])
+
+# model, loss_df = train_nn(
+#     training_dataloader,
+#     testing_dataloader,
+#     model,
+#     learning_rate = 1e-3,
+#     batch_size = 64,
+#     epochs = 500
+# )
+
+# fig = go.Figure()
+# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
+#                     mode='lines', name='Train'))
+# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
+#                     mode='lines', name='Test'))
+# fig.show()
+
+# model, loss_df = train_nn(
+#     training_dataloader,
+#     testing_dataloader,
+#     model,
+#     learning_rate = 1e-3,
+#     batch_size = 64,
+#     epochs = 5000
+# )
+
+# fig = go.Figure()
+# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
+#                     mode='lines', name='Train'))
+# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
+#                     mode='lines', name='Test'))
+# fig.show()
+
+
+
+
+
+# '../ext_data/zma/panzea/phenotypes/'
+
+# # pd.read_table('../ext_data/zma/panzea/phenotypes/traitMatrix_maize282NAM_v15-130212.txt', low_memory = False)
+
+# # pd.read_excel('../ext_data/zma/panzea/phenotypes/traitMatrix_maize282NAM_v15-130212_TraitDescritptions.xlsx')
+
+
+
+
+
+
 
 
 
@@ -640,3 +1018,5 @@ y3 = apply_cs(y3, scale_dict['y3'])
 # # pd.read_table('../ext_data/zma/panzea/phenotypes/traitMatrix_maize282NAM_v15-130212.txt', low_memory = False)
 
 # # pd.read_excel('../ext_data/zma/panzea/phenotypes/traitMatrix_maize282NAM_v15-130212_TraitDescritptions.xlsx')
+
+

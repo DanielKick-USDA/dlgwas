@@ -5,17 +5,17 @@ import pandas as pd
 import numpy as np
 import re
 
-import torch
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
-from torch import nn
+# import torch
+# from torch.utils.data import Dataset
+# from torch.utils.data import DataLoader
+# from torch import nn
 
 # TODO fixme
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-if use_gpu_num in [0, 1]: 
-    torch.cuda.set_device(use_gpu_num)
-print(f"Using {device} device")
+# device = "cuda" if torch.cuda.is_available() else "cpu"
+# if use_gpu_num in [0, 1]: 
+#     torch.cuda.set_device(use_gpu_num)
+# print(f"Using {device} device")
 
 import tqdm
 from tqdm import tqdm
@@ -89,6 +89,16 @@ original_rows = data.shape[0]
 mask = [True if e in [e1['sample'] for e1 in 
                       [e for e in samples_and_matches if len(e['matches']) >= 1]
               ] else False for e in data['sample'] ]
+data = data.loc[mask,].reset_index().drop(columns = 'index')
+print(str(original_rows - data.shape[0])+' rows dropped.')
+
+# repeat for data completeness:
+original_rows = data.shape[0]
+# exclude rows with missing values in y
+mask = (data.leaf_length.notna() &                    
+        data.leaf_width.notna() &                     
+        data.upper_leaf_angle.notna())
+
 data = data.loc[mask,].reset_index().drop(columns = 'index')
 print(str(original_rows - data.shape[0])+' rows dropped.')
 
@@ -377,6 +387,12 @@ for i in range(len(uniq_pop)):
 
 taxa_groupings
 
+taxa_groupings.to_csv('../models/'+nb_name+'/taxa_groupings.csv')
+
+
+
+data.to_csv('../models/'+nb_name+'/clean_data.csv')
+
 
 
 Holdout_Int = 0
@@ -388,54 +404,58 @@ test_idxs = list(taxa_groupings.loc[mask, ].index)
 
 
 
-y1 = data['leaf_length']
-y2 = data['leaf_width']
-y3 = data['upper_leaf_angle']
-
-# Non-Hilbert Version
-save_path = '../models/'+nb_name+'/markers/'
-xs = np.zeros(shape = (len(y1), 943455, 4))
-
-failed_idxs = []
-
-for i in tqdm(range(len(y1))):
-    save_file_path = save_path+'m'+str(i)+'.npy'
-    if os.path.exists(save_file_path):
-        xs[i, :, :] = np.load(save_file_path)
-    else:
-        failed_idxs += [i]
-if failed_idxs != []:
-    print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
-
-# Hilbert version
-save_path = '../models/'+nb_name+'/hilbert/'
-xs = np.zeros(shape = (len(y1), 1024, 1024, 4))
-
-failed_idxs = []
-
-for i in tqdm(range(len(y1))):
-    save_file_path = save_path+'h'+str(i)+'.npy'
-    if os.path.exists(save_file_path):
-        xs[i, :, :, :] = np.load(save_file_path)
-    else:
-        failed_idxs += [i]
-if failed_idxs != []:
-    print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
 
 
-def calc_cs(x): return [np.mean(x, axis = 0), np.std(x, axis = 0)]
 
-def apply_cs(xs, cs_dict_entry): return ((xs - cs_dict_entry[0]) / cs_dict_entry[0])
 
-scale_dict = {
-    'y1':calc_cs(y1[train_idxs]),
-    'y2':calc_cs(y2[train_idxs]),
-    'y3':calc_cs(y3[train_idxs])
-}
+# y1 = data['leaf_length']
+# y2 = data['leaf_width']
+# y3 = data['upper_leaf_angle']
 
-y1 = apply_cs(y1, scale_dict['y1'])
-y2 = apply_cs(y2, scale_dict['y2'])
-y3 = apply_cs(y3, scale_dict['y3'])
+# # Non-Hilbert Version
+# save_path = '../models/'+nb_name+'/markers/'
+# xs = np.zeros(shape = (len(y1), 943455, 4))
+
+# failed_idxs = []
+
+# for i in tqdm(range(len(y1))):
+#     save_file_path = save_path+'m'+str(i)+'.npy'
+#     if os.path.exists(save_file_path):
+#         xs[i, :, :] = np.load(save_file_path)
+#     else:
+#         failed_idxs += [i]
+# if failed_idxs != []:
+#     print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
+
+# # Hilbert version
+# save_path = '../models/'+nb_name+'/hilbert/'
+# xs = np.zeros(shape = (len(y1), 1024, 1024, 4))
+
+# failed_idxs = []
+
+# for i in tqdm(range(len(y1))):
+#     save_file_path = save_path+'h'+str(i)+'.npy'
+#     if os.path.exists(save_file_path):
+#         xs[i, :, :, :] = np.load(save_file_path)
+#     else:
+#         failed_idxs += [i]
+# if failed_idxs != []:
+#     print(str(len(failed_idxs))+' indexes could not be retrieved. Examine `failed_idxs` for more information.')
+
+
+# def calc_cs(x): return [np.mean(x, axis = 0), np.std(x, axis = 0)]
+
+# def apply_cs(xs, cs_dict_entry): return ((xs - cs_dict_entry[0]) / cs_dict_entry[0])
+
+# scale_dict = {
+#     'y1':calc_cs(y1[train_idxs]),
+#     'y2':calc_cs(y2[train_idxs]),
+#     'y3':calc_cs(y3[train_idxs])
+# }
+
+# y1 = apply_cs(y1, scale_dict['y1'])
+# y2 = apply_cs(y2, scale_dict['y2'])
+# y3 = apply_cs(y3, scale_dict['y3'])
 
 # y1_train = torch.from_numpy(y1[train_idxs]).to(device).float()[:, None]
 # y2_train = torch.from_numpy(y2[train_idxs]).to(device).float()[:, None]

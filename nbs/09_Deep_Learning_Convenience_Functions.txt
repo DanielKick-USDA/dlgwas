@@ -1,0 +1,29 @@
+#| default_exp dlfn
+
+#| hide
+from nbdev.showdoc import *
+
+#| export
+
+def calc_cs(x # numeric array
+           ): 
+    "Calculate nan mean and nan std of an array. Returned as list"
+    import numpy as np
+    return [np.nanmean(x, axis = 0), np.nanstd(x, axis = 0)]
+
+#| export
+
+def apply_cs(xs, 
+             cs_dict_entry # list of length 2 containing mean and s
+            ): return ((xs - cs_dict_entry[0]) / cs_dict_entry[1])
+
+#| export
+
+def reverse_cs(xs, cs_dict_entry): return (cs_dict_entry[1] * xs) + cs_dict_entry[0]
+
+
+
+#| hide
+import nbdev; nbdev.nbdev_export()
+
+

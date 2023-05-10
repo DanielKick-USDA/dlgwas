@@ -1,0 +1,472 @@
+use_gpu_num = 0 # This should change based on whichever gpu is free. 
+                # If even notebooks are set to 0 then that will be a reasonable default. 
+
+import os
+import pandas as pd
+import numpy as np
+import re
+
+import torch
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+from torch import nn
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+if use_gpu_num in [0, 1]: 
+    torch.cuda.set_device(use_gpu_num)
+print(f"Using {device} device")
+
+import tqdm
+from tqdm import tqdm
+
+import plotly.graph_objects as go
+import plotly.express as px
+import plotly.io as pio
+pio.templates.default = "plotly_white"
+
+
+import dlgwas
+from dlgwas.kegg import ensure_dir_path_exists
+from dlgwas.kegg import get_cached_result
+from dlgwas.kegg import put_cached_result
+
+from dlgwas.dlfn import calc_cs
+from dlgwas.dlfn import apply_cs
+from dlgwas.dlfn import reverse_cs
+
+# set up directory for notebook artifacts
+nb_name = '12_TianEtAl2011'
+ensure_dir_path_exists(dir_path = '../models/'+nb_name)
+ensure_dir_path_exists(dir_path = '../reports/'+nb_name)
+
+# Read in cleaned data
+taxa_groupings = pd.read_csv('../models/10_TianEtAl2011/taxa_groupings.csv')
+data           = pd.read_csv('../models/10_TianEtAl2011/clean_data.csv')
+
+# Define holdout sets (Populations)
+uniq_pop = list(set(taxa_groupings['Population']))
+print(str(len(uniq_pop))+" Unique Holdout Groups.")
+taxa_groupings['Holdout'] = None
+for i in range(len(uniq_pop)):
+    mask = (taxa_groupings['Population'] == uniq_pop[i])
+    taxa_groupings.loc[mask, 'Holdout'] = i
+
+taxa_groupings
+
+#randomly holdout a population if there is not a file with the population held out.
+# Holdout_Int = 0
+Holdout_Int_path = '../models/'+nb_name+'/holdout_pop_int.pkl'
+if None != get_cached_result(Holdout_Int_path):
+    Holdout_Int = get_cached_result(Holdout_Int_path)
+else:
+    Holdout_Int = int(np.random.choice([i for i in range(len(uniq_pop))], 1))
+    put_cached_result(Holdout_Int_path, Holdout_Int)
+
+
+print("Holding out i="+str(Holdout_Int)+": "+uniq_pop[Holdout_Int])
+
+mask = (taxa_groupings['Holdout'] == Holdout_Int)
+train_idxs = list(taxa_groupings.loc[~mask, ].index)
+test_idxs = list(taxa_groupings.loc[mask, ].index)
+
+# used to go from index in tensor to index in data so that the right xs tensor can be loaded in
+idx_original = np.array(data.index)
+
+y1 = data['leaf_length']
+y2 = data['leaf_width']
+y3 = data['upper_leaf_angle']
+y1 = np.array(y1)
+y2 = np.array(y2)
+y3 = np.array(y3)
+
+scale_dict = {
+    'y1':calc_cs(y1[train_idxs]),
+    'y2':calc_cs(y2[train_idxs]),
+    'y3':calc_cs(y3[train_idxs])
+}
+
+y1 = apply_cs(y1, scale_dict['y1'])
+y2 = apply_cs(y2, scale_dict['y2'])
+y3 = apply_cs(y3, scale_dict['y3'])
+
+# loading this into memory causes the session to crash
+
+y1_train = torch.from_numpy(y1[train_idxs])[:, None]
+y2_train = torch.from_numpy(y2[train_idxs])[:, None]
+y3_train = torch.from_numpy(y3[train_idxs])[:, None]
+
+idx_original_train = torch.from_numpy(idx_original[train_idxs])
+
+y1_test = torch.from_numpy(y1[test_idxs])[:, None]
+y2_test = torch.from_numpy(y2[test_idxs])[:, None]
+y3_test = torch.from_numpy(y3[test_idxs])[:, None]
+
+idx_original_test = torch.from_numpy(idx_original[test_idxs])
+
+class CustomDataset(Dataset):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if use_gpu_num in [0, 1]: 
+        torch.cuda.set_device(use_gpu_num)
+    print(f"Using {device} device")
+    
+    def __init__(self, y1, y2, y3, 
+                 idx_original,
+                 transform = None, target_transform = None, 
+                 **kwargs
+                ):
+        self.y1 = y1
+        self.y2 = y2
+        self.y3 = y3
+        self.idx_original = idx_original
+        self.transform = transform
+        self.target_transform = target_transform    
+    
+    def __len__(self):
+        return len(self.y1)
+    
+    def __getitem__(self, idx):
+        y1_idx = self.y1[idx].to(device).float()
+        y2_idx = self.y2[idx].to(device).float()
+        y3_idx = self.y3[idx].to(device).float()
+        
+        
+        # Change type of xs loaded !! ----------------------------------------
+        # load in xs as they are needed.
+        # Non-Hilbert Version
+        
+        
+        save_path = '../models/10_TianEtAl2011/markers/'
+        # Hilbert version
+        # save_path = '../models/'+nb_name+'/hilbert/'
+        save_file_path = save_path+'m'+str(int(self.idx_original[idx]))+'.npz'
+        xs_idx = np.load(save_file_path)['arr_0']
+        xs_idx = torch.from_numpy(xs_idx).to(device).float()
+        xs_idx = xs_idx.squeeze()
+        
+        # to match pytorch's conventions channel must be in the second dim
+        xs_idx = torch.swapaxes(xs_idx, 0, 1) 
+        
+        if self.transform:
+            xs_idx = self.transform(xs_idx)
+            
+        if self.target_transform:
+            y1_idx = self.transform(y1_idx)
+            y2_idx = self.transform(y2_idx)
+            y3_idx = self.transform(y3_idx)
+        return xs_idx, y1_idx, y2_idx, y3_idx
+
+training_dataloader = DataLoader(
+    CustomDataset(
+        y1 = y1_train,
+        y2 = y2_train,
+        y3 = y3_train,
+        idx_original = idx_original_train
+    ), 
+    batch_size = 64, 
+    shuffle = True)
+
+testing_dataloader = DataLoader(
+    CustomDataset(
+        y1 = y1_test,
+        y2 = y2_test,
+        y3 = y3_test,
+        idx_original = idx_original_train
+    ), 
+    batch_size = 64, 
+    shuffle = True)
+
+xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
+
+# del training_dataloader
+
+# torch.cuda.empty_cache()
+
+xs_i.shape
+
+class NeuralNetwork(nn.Module):
+    def __init__(self):
+        super(NeuralNetwork, self).__init__()    
+        self.x_network = nn.Sequential(
+            nn.Conv1d(
+                in_channels= 4, # second channel
+                out_channels= 4,
+                kernel_size= 3,
+                stride= 2
+            ), 
+            nn.MaxPool1d((3,), stride=2),
+            nn.Conv1d(
+                in_channels= 4, # second channel
+                out_channels= 4,
+                kernel_size= 3,
+                stride= 2
+            ), 
+            nn.MaxPool1d((3,), stride=2),
+            nn.Conv1d(
+                in_channels= 4, # second channel
+                out_channels= 4,
+                kernel_size= 3,
+                stride= 2
+            ), 
+            nn.MaxPool1d((3,), stride=2),
+            nn.Conv1d(
+                in_channels= 4, # second channel
+                out_channels= 4,
+                kernel_size= 3,
+                stride= 2
+            ), 
+            nn.MaxPool1d((3,), stride=2),
+            nn.Conv1d(
+                in_channels= 4, # second channel
+                out_channels= 4,
+                kernel_size= 3,
+                stride= 2
+            ), 
+            nn.MaxPool1d((3,), stride=2),
+            nn.Conv1d(
+                in_channels= 4, # second channel
+                out_channels= 4,
+                kernel_size= 3,
+                stride= 2
+            ), 
+            nn.MaxPool1d((3,), stride=2),
+            nn.Conv1d(
+                in_channels= 4, # second channel
+                out_channels= 4,
+                kernel_size= 3,
+                stride= 2
+            ), 
+            nn.MaxPool1d((3,), stride=2),
+            nn.Conv1d(
+                in_channels= 4, # second channel
+                out_channels= 4,
+                kernel_size= 3,
+                stride= 2
+            ), 
+            nn.MaxPool1d((3,), stride=2),
+            
+            nn.Flatten(),
+            nn.Linear(52, 32),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+                        
+            nn.Linear(32, 32),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            
+            nn.Linear(32, 1)
+        )
+        
+    def forward(self, x):
+        x_out = self.x_network(x)
+        return x_out
+
+
+
+
+
+if not os.path.exists('../models/'+nb_name+'/model.pt'): 
+    model = NeuralNetwork().to(device)
+    # print(model)
+    # model(xs_i).shape # try prediction on one batch
+
+
+
+def train_loop(dataloader, model, loss_fn, optimizer, silent = False):
+    size = len(dataloader.dataset)
+    for batch, (xs_i, y1_i, y2_i, y3_i) in enumerate(dataloader):
+        # Compute prediction and loss
+        pred = model(xs_i)
+        loss = loss_fn(pred, y1_i) # <----------------------------------------
+
+        # Backpropagation
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if batch % 100 == 0:
+            loss, current = loss.item(), batch * len(y1_i) # <----------------
+            if not silent:
+                print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+
+                
+def train_error(dataloader, model, loss_fn, silent = False):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    train_loss = 0
+
+    with torch.no_grad():
+        for xs_i, y1_i, y2_i, y3_i in dataloader:
+            pred = model(xs_i)
+            train_loss += loss_fn(pred, y1_i).item() # <----------------------
+            
+    train_loss /= num_batches
+    return(train_loss) 
+
+            
+def test_loop(dataloader, model, loss_fn, silent = False):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    test_loss = 0
+
+    with torch.no_grad():
+        for xs_i, y1_i, y2_i, y3_i in dataloader:
+            pred = model(xs_i)
+            test_loss += loss_fn(pred, y1_i).item() # <-----------------------
+
+    test_loss /= num_batches
+    if not silent:
+        print(f"Test Error: Avg loss: {test_loss:>8f}")
+    return(test_loss) 
+
+def train_nn(
+    training_dataloader,
+    testing_dataloader,
+    model,
+    learning_rate = 1e-3,
+    batch_size = 64,
+    epochs = 500
+):
+    # Initialize the loss function
+    loss_fn = nn.MSELoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+
+    loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
+    loss_df['TrainMSE'] = np.nan
+    loss_df['TestMSE']  = np.nan
+
+    for t in tqdm(range(epochs)):        
+#         print(f"Epoch {t+1}\n-------------------------------")
+        train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
+
+        loss_df.loc[loss_df.index == t, 'TrainMSE'
+                   ] = train_error(training_dataloader, model, loss_fn, silent = True)
+        
+        loss_df.loc[loss_df.index == t, 'TestMSE'
+                   ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
+        
+        if (t+1)%10: # Cache in case training is interupted
+            print(loss_df.loc[loss_df.index == t, ['TrainMSE', 'TestMSE']])
+            torch.save(model.state_dict(), 
+                       '../models/'+nb_name+'/model_'+str(t)+'_'+str(epochs)+'.pt') # convention is to use .pt or .pth
+        
+    return([model, loss_df])
+
+# don't run if either of these exist because there may be cases where we want the results but not the model
+
+if not os.path.exists('../models/'+nb_name+'/model.pt'): 
+
+    model, loss_df = train_nn(
+        training_dataloader,
+        testing_dataloader,
+        model,
+        learning_rate = 1e-3,
+        batch_size = 64,
+        epochs = 200
+    )
+    
+    # experimental outputs:
+    # 1. Model
+    torch.save(model.state_dict(), '../models/'+nb_name+'/model.pt') # convention is to use .pt or .pth
+
+    # 2. loss_df
+    loss_df.to_csv('../reports/'+nb_name+'/loss_df.csv', index=False)  
+    
+# 200/200 [15:15:15<00:00, 274.58s/it]
+
+loss_df = pd.read_csv('../reports/'+nb_name+'/loss_df.csv')
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
+                    mode='lines', name='Train'))
+fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
+                    mode='lines', name='Test'))
+fig.show()
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=loss_df.Epoch, 
+                         y= reverse_cs(loss_df.TrainMSE, 
+                                       scale_dict['y1']),
+                         mode='lines', name='Train'))
+fig.add_trace(go.Scatter(x=loss_df.Epoch, 
+                         y= reverse_cs(loss_df.TestMSE, 
+                                       scale_dict['y1']),
+                         mode='lines', name='Test'))
+fig.show()
+
+# run on cpu -----
+device = 'cpu'
+
+training_dataloader = DataLoader(
+    CustomDataset(
+        y1 = y1_train,
+        y2 = y2_train,
+        y3 = y3_train,
+        idx_original = idx_original_train
+    ), 
+    batch_size = 64, 
+    shuffle = True)
+
+testing_dataloader = DataLoader(
+    CustomDataset(
+        y1 = y1_test,
+        y2 = y2_test,
+        y3 = y3_test,
+        idx_original = idx_original_train
+    ), 
+    batch_size = 64, 
+    shuffle = True)
+
+# If the model had to be trained from scratch, loading it in will not overwrite it. GPU will run out of memory.
+# Option 1
+    # Remove and reload the model
+    # del model
+    # torch.cuda.empty_cache()
+# Option 2
+    # Only load model if it's not in the scope already
+    # model = NeuralNetwork()
+    # model.load_state_dict(torch.load('../models/'+nb_name+'/model.pt'))
+
+model_exists = 'model' in locals() or 'model' in globals()
+
+if not model_exists:
+    model = NeuralNetwork()
+    model.load_state_dict(torch.load('../models/'+nb_name+'/model.pt'))
+    model.to(device)
+
+
+
+# xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
+
+# del xs_i, y1_i, y2_i, y3_i 
+
+# del model
+
+torch.cuda.empty_cache()
+
+def yhat_loop(dataloader, model):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    
+    y_true = np.array([])
+    y_pred = np.array([])
+    
+    with torch.no_grad():
+        for xs_i, y1_i, y2_i, y3_i in dataloader:
+            yhat_i = model(xs_i)
+            y_i = y1_i # <-----------------------
+#             pdb.set_trace()
+            y_true = np.append(y_true, np.array(yhat_i.cpu()))
+            y_pred = np.append(y_pred, np.array(y_i.cpu()))
+    
+    out = np.concatenate([y_true[:, None], y_pred[:, None]], axis = 1) 
+    out = pd.DataFrame(out, columns = ['y_true', 'y_pred'])
+    return(out)
+
+out = yhat_loop(testing_dataloader, model)
+
+# reverse_cs(out.y_true, scale_dict['y1'])
+px.scatter(out, x = 'y_true', y = 'y_pred')
+
+px.histogram(x = out.y_true - out.y_pred, nbins= 50)
+
+data
