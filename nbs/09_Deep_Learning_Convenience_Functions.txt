@@ -21,6 +21,242 @@ def apply_cs(xs,
 
 def reverse_cs(xs, cs_dict_entry): return (cs_dict_entry[1] * xs) + cs_dict_entry[0]
 
+#| export
+
+import numpy as np
+#     import pandas as pd
+import torch
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+#     from torch import nn
+import tqdm
+from tqdm import tqdm
+
+
+class TianEtAl2011Dataset(Dataset):    
+    def __init__(self, 
+                 y1, y2, y3, #xs, 
+                 idx_original,
+                 marker_type = 'markers',
+                 transform = None, target_transform = None,
+                 use_gpu_num = 0,
+                 **kwargs # use to allow for cpu to be passed into function 
+                
+                ):
+        
+        if 'device' in kwargs.keys():
+            pass
+        else:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if use_gpu_num in [0, 1]: 
+                torch.cuda.set_device(use_gpu_num)
+                
+        print(f"Using {device} device")
+        self.device = device
+
+        self.y1 = y1
+        self.y2 = y2
+        self.y3 = y3
+        self.idx_original = idx_original
+        self.marker_type = marker_type
+        self.transform = transform
+        self.target_transform = target_transform    
+    
+    def __len__(self):
+        return len(self.y1)
+    
+    def __getitem__(self, idx):
+        y1_idx = self.y1[idx].to(self.device).float()
+        y2_idx = self.y2[idx].to(self.device).float()
+        y3_idx = self.y3[idx].to(self.device).float()
+        
+        
+        # Change type of xs loaded !! ----------------------------------------
+        if self.marker_type == 'markers':        
+            # Non-Hilbert Version
+            save_path = '../models/10_TianEtAl2011/markers/'
+            save_file_path = save_path+'m'+str(int(self.idx_original[idx]))+'.npz'
+            xs_idx = np.load(save_file_path)['arr_0']
+            xs_idx = torch.from_numpy(xs_idx).to(self.device).float()
+            xs_idx = xs_idx.squeeze()
+            # to match pytorch's conventions channel must be in the second dim
+            xs_idx = torch.swapaxes(xs_idx, 0, 1) 
+            
+        elif self.marker_type == 'hilbert':
+            # Hilbert version
+            save_path = '../models/10_TianEtAl2011/hilbert/'
+            save_file_path = save_path+'h'+str(int(self.idx_original[idx]))+'.npz'
+            xs_idx = np.load(save_file_path)['arr_0']
+            # there are missing values in the hilbert curve. Set these to 0
+            xs_idx[np.isnan(xs_idx)] = 0
+            
+            xs_idx = torch.from_numpy(xs_idx).to(self.device).float()
+            xs_idx = xs_idx.squeeze()
+            
+            # to match pytorch's conventions channel must be in the second dim
+            xs_idx = torch.swapaxes(xs_idx, 1, 2) 
+            xs_idx = torch.swapaxes(xs_idx, 0, 1)    
+            
+            
+        
+        if self.transform:
+            xs_idx = self.transform(xs_idx)
+            
+        if self.target_transform:
+            y1_idx = self.transform(y1_idx)
+            y2_idx = self.transform(y2_idx)
+            y3_idx = self.transform(y3_idx)
+        return xs_idx, y1_idx, y2_idx, y3_idx
+
+#| export
+
+def train_loop(dataloader, model, loss_fn, optimizer, silent = False):
+#     import numpy as np
+#     import pandas as pd
+    import torch
+    from torch.utils.data import Dataset
+    from torch.utils.data import DataLoader
+#     from torch import nn
+    size = len(dataloader.dataset)
+    for batch, (xs_i, y1_i, y2_i, y3_i) in enumerate(dataloader):
+        # Compute prediction and loss
+        pred = model(xs_i)
+        loss = loss_fn(pred, y1_i) # <----------------------------------------
+
+        # Backpropagation
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if batch % 100 == 0:
+            loss, current = loss.item(), batch * len(y1_i) # <----------------
+            if not silent:
+                print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+
+                
+
+#| export
+
+def train_error(dataloader, model, loss_fn, silent = False):
+#     import numpy as np
+#     import pandas as pd
+    import torch
+    from torch.utils.data import Dataset
+    from torch.utils.data import DataLoader
+#     from torch import nn
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    train_loss = 0
+
+    with torch.no_grad():
+        for xs_i, y1_i, y2_i, y3_i in dataloader:
+            pred = model(xs_i)
+            train_loss += loss_fn(pred, y1_i).item() # <----------------------
+            
+    train_loss /= num_batches
+    return(train_loss) 
+
+#| export
+
+def test_loop(dataloader, model, loss_fn, silent = False):
+#     import numpy as np
+#     import pandas as pd
+    import torch
+    from torch.utils.data import Dataset
+    from torch.utils.data import DataLoader
+#     from torch import nn
+
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    test_loss = 0
+
+    with torch.no_grad():
+        for xs_i, y1_i, y2_i, y3_i in dataloader:
+            pred = model(xs_i)
+            test_loss += loss_fn(pred, y1_i).item() # <-----------------------
+
+    test_loss /= num_batches
+    if not silent:
+        print(f"Test Error: Avg loss: {test_loss:>8f}")
+    return(test_loss) 
+
+#| export
+
+def train_nn(
+    nb_name,
+    training_dataloader,
+    testing_dataloader,
+    model,
+    learning_rate = 1e-3,
+    batch_size = 64,
+    epochs = 500
+):
+    import numpy as np
+    import pandas as pd
+    import torch
+#     from torch.utils.data import Dataset
+#     from torch.utils.data import DataLoader
+    from torch import nn
+    
+    # Initialize the loss function
+    loss_fn = nn.MSELoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+
+    loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
+    loss_df['TrainMSE'] = np.nan
+    loss_df['TestMSE']  = np.nan
+
+    for t in tqdm(range(epochs)):        
+        # print(f"Epoch {t+1}\n-------------------------------")
+        train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
+
+        loss_df.loc[loss_df.index == t, 'TrainMSE'
+                   ] = train_error(training_dataloader, model, loss_fn, silent = True)
+        
+        loss_df.loc[loss_df.index == t, 'TestMSE'
+                   ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
+        
+        if (t+1)%5 == 0: # Cache in case training is interupted. 
+            # print(loss_df.loc[loss_df.index == t, ['TrainMSE', 'TestMSE']])
+            torch.save(model.state_dict(), 
+                       '../models/'+nb_name+'/model_'+str(t)+'_'+str(epochs)+'.pt') # convention is to use .pt or .pth
+        
+    return([model, loss_df])
+
+#| export
+
+def yhat_loop(dataloader, model):
+    import numpy as np
+    import pandas as pd
+    import torch
+#     from torch.utils.data import Dataset
+#     from torch.utils.data import DataLoader
+#     from torch import nn
+
+    
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    
+    y_true = np.array([])
+    y_pred = np.array([])
+    
+    with torch.no_grad():
+        for xs_i, y1_i, y2_i, y3_i in dataloader:
+            yhat_i = model(xs_i)
+            y_i = y1_i # <-----------------------
+            y_pred = np.append(y_pred, np.array(yhat_i.cpu()))
+            y_true = np.append(y_true, np.array(y_i.cpu()))
+    
+    out = np.concatenate([y_true[:, None], y_pred[:, None]], axis = 1) 
+    out = pd.DataFrame(out, columns = ['y_true', 'y_pred'])
+    return(out)
+
+
+
+
+
+
+
 
 
 #| hide

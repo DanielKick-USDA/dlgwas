@@ -21,7 +21,10 @@ def get_cached_result(
     save_path
 ):
     import os
-    import pickle as pkl
+#     import pickle as pkl
+    import pickle5 as pkl # Using non-base version of pickle 
+#                           # conda env with gpu support for tf and torch uses python 3.7.
+#                           # Python 3.7 doesn't contain pickle v 5
     if not os.path.exists(save_path):
         cached_result = None
     else:
@@ -34,7 +37,8 @@ def put_cached_result(
     save_path,
     save_obj
 ):
-    import pickle as pkl
+#     import pickle as pkl
+    import pickle5 as pkl
     from dlgwas.kegg import ensure_dir_path_exists
     ensure_dir_path_exists(dir_path= '/'.join(save_path.split('/')[:-1]) )
     

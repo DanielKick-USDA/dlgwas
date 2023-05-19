@@ -1,5 +1,21 @@
+# Hacky way to schedule. Here I'm setting these to sleep until the gpus should be free.
+# At the end of the notebooks  os._exit(00) will kill the kernel freeing the gpu. 
+#                          Hours to wait
+# import time; time.sleep( (18*2) * (60*60))
+
+# Run Settings:
+nb_name = '11_TianEtAl2011'# Set manually! -----------------------------------
+
+downsample_obs = False
+train_n = 90
+test_n = 10
+
+dataloader_batch_size = 64
+run_epochs = 200
+
 use_gpu_num = 1
 
+# Imports --------------------------------------------------------------------
 import os
 import pandas as pd
 import numpy as np
@@ -9,11 +25,6 @@ import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from torch import nn
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-if use_gpu_num in [0, 1]: 
-    torch.cuda.set_device(use_gpu_num)
-print(f"Using {device} device")
 
 import tqdm
 from tqdm import tqdm
@@ -33,17 +44,20 @@ from dlgwas.dlfn import calc_cs
 from dlgwas.dlfn import apply_cs
 from dlgwas.dlfn import reverse_cs
 
+from dlgwas.dlfn import TianEtAl2011Dataset
+from dlgwas.dlfn import train_loop
+from dlgwas.dlfn import train_error
+from dlgwas.dlfn import test_loop
+from dlgwas.dlfn import train_nn
+from dlgwas.dlfn import yhat_loop
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+if use_gpu_num in [0, 1]: 
+    torch.cuda.set_device(use_gpu_num)
+print(f"Using {device} device")
 
-
-
-# set up directory for notebook artifacts
-nb_name = '11_TianEtAl2011'
-
-# import shutil
-# # to rerun from scratch:
-# shutil.rmtree('../models/'+nb_name, ignore_errors=True)
-# shutil.rmtree('../reports/'+nb_name, ignore_errors=True)
+ensure_dir_path_exists(dir_path = '../models/'+nb_name)
+ensure_dir_path_exists(dir_path = '../reports/'+nb_name)
 
 ensure_dir_path_exists(dir_path = '../models/'+nb_name)
 ensure_dir_path_exists(dir_path = '../reports/'+nb_name)
@@ -80,17 +94,14 @@ test_idxs = list(taxa_groupings.loc[mask, ].index)
 
 [len(e) for e in [test_idxs, train_idxs]]
 
-downsample_obs = True
-train_n = 900
-test_n = 100
-
+# downsample_obs = True
+# train_n = 900
+# test_n = 100
 
 if downsample_obs == True:
     train_idxs = np.random.choice(train_idxs, train_n)
     test_idxs = np.random.choice(test_idxs, test_n)
     print([len(e) for e in [test_idxs, train_idxs]])
-
-
 
 # used to go from index in tensor to index in data so that the right xs tensor can be loaded in
 idx_original = np.array(data.index)
@@ -102,17 +113,20 @@ y1 = np.array(y1)
 y2 = np.array(y2)
 y3 = np.array(y3)
 
-scale_dict = {
-    'y1':calc_cs(y1[train_idxs]),
-    'y2':calc_cs(y2[train_idxs]),
-    'y3':calc_cs(y3[train_idxs])
-}
+scale_dict_path = '../models/'+nb_name+'/scale_dict.pkl'
+if None != get_cached_result(scale_dict_path):
+    scale_dict = get_cached_result(scale_dict_path)
+else:
+    scale_dict = {
+        'y1':calc_cs(y1[train_idxs]),
+        'y2':calc_cs(y2[train_idxs]),
+        'y3':calc_cs(y3[train_idxs])
+    }
+    put_cached_result(scale_dict_path, scale_dict)
 
 y1 = apply_cs(y1, scale_dict['y1'])
 y2 = apply_cs(y2, scale_dict['y2'])
 y3 = apply_cs(y3, scale_dict['y3'])
-
-
 
 # loading this into memory causes the session to crash
 
@@ -122,204 +136,215 @@ y3_train = torch.from_numpy(y3[train_idxs])[:, None]
 
 idx_original_train = torch.from_numpy(idx_original[train_idxs])
 
-
-
 y1_test = torch.from_numpy(y1[test_idxs])[:, None]
 y2_test = torch.from_numpy(y2[test_idxs])[:, None]
 y3_test = torch.from_numpy(y3[test_idxs])[:, None]
 
 idx_original_test = torch.from_numpy(idx_original[test_idxs])
 
-
-
-class CustomDataset(Dataset):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if use_gpu_num in [0, 1]: 
-        torch.cuda.set_device(use_gpu_num)
-    print(f"Using {device} device")
-    
-    def __init__(self, y1, y2, y3, #xs, 
-                 idx_original,
-                 
-                 transform = None, target_transform = None):
-        self.y1 = y1
-        self.y2 = y2
-        self.y3 = y3
-#         self.xs = xs
-        self.idx_original = idx_original
-        self.transform = transform
-        self.target_transform = target_transform    
-    
-    def __len__(self):
-        return len(self.y1)
-    
-    def __getitem__(self, idx):
-        y1_idx = self.y1[idx].to(device).float()
-        y2_idx = self.y2[idx].to(device).float()
-        y3_idx = self.y3[idx].to(device).float()
-        
-        
-        # Change type of xs loaded !! ----------------------------------------
-        # load in xs as they are needed.
-        # Non-Hilbert Version
-        save_path = '../models/10_TianEtAl2011/markers/'
-        # Hilbert version
-        # save_path = '../models/'+nb_name+'/hilbert/'
-        save_file_path = save_path+'m'+str(int(self.idx_original[idx]))+'.npz'
-        xs_idx = np.load(save_file_path)['arr_0']
-        xs_idx = torch.from_numpy(xs_idx).to(device).float()
-        xs_idx = xs_idx.squeeze()
-        
-        if self.transform:
-            xs_idx = self.transform(xs_idx)
-            
-        if self.target_transform:
-            y1_idx = self.transform(y1_idx)
-            y2_idx = self.transform(y2_idx)
-            y3_idx = self.transform(y3_idx)
-        return xs_idx, y1_idx, y2_idx, y3_idx
+# dataloader_batch_size = 64
 
 training_dataloader = DataLoader(
-    CustomDataset(
-        y1 = y1_train,
-        y2 = y2_train,
-        y3 = y3_train,
-        idx_original = idx_original_train
+    TianEtAl2011Dataset(
+                  y1 =           y1_train,
+                  y2 =           y2_train,
+                  y3 =           y3_train,
+        idx_original = idx_original_train,
+         use_gpu_num = use_gpu_num,
+#         device = 'cpu'
     ), 
-    batch_size = 64, 
+    batch_size = dataloader_batch_size, 
     shuffle = True)
 
 testing_dataloader = DataLoader(
-    CustomDataset(
-        y1 = y1_test,
-        y2 = y2_test,
-        y3 = y3_test,
-        idx_original = idx_original_train
+    TianEtAl2011Dataset(
+                  y1 =           y1_test,
+                  y2 =           y2_test,
+                  y3 =           y3_test,
+        idx_original = idx_original_test,
+         use_gpu_num = use_gpu_num,
+#         device = 'cpu'
     ), 
-    batch_size = 64, 
+    batch_size = dataloader_batch_size, 
     shuffle = True)
 
-xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
+# xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
 
 # del training_dataloader
 
 # torch.cuda.empty_cache()
 
-xs_i.shape
+# xs_i.shape
 
 class NeuralNetwork(nn.Module):
     def __init__(self):
         super(NeuralNetwork, self).__init__()    
         self.x_network = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(3773820, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
+            nn.Linear(3773820, 1),
+#             nn.BatchNorm1d(64),
+#             nn.ReLU(),
+#             nn.Linear(64, 1)
         )
         
     def forward(self, x):
         x_out = self.x_network(x)
         return x_out
 
-model = NeuralNetwork().to(device)
+# model = NeuralNetwork().to(device)
 # print(model)
 
 
 
-model(xs_i)[0:3] # try prediction on one batch
+# model(xs_i)[0:3] # try prediction on one batch
 
-def train_loop(dataloader, model, loss_fn, optimizer, silent = False):
-    size = len(dataloader.dataset)
-    for batch, (xs_i, y1_i, y2_i, y3_i) in enumerate(dataloader):
-        # Compute prediction and loss
-        pred = model(xs_i)
-        loss = loss_fn(pred, y1_i) # <----------------------------------------
+# def train_loop(dataloader, model, loss_fn, optimizer, silent = False):
+#     size = len(dataloader.dataset)
+#     for batch, (xs_i, y1_i, y2_i, y3_i) in enumerate(dataloader):
+#         # Compute prediction and loss
+#         pred = model(xs_i)
+#         loss = loss_fn(pred, y1_i) # <----------------------------------------
 
-        # Backpropagation
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+#         # Backpropagation
+#         optimizer.zero_grad()
+#         loss.backward()
+#         optimizer.step()
 
-        if batch % 100 == 0:
-            loss, current = loss.item(), batch * len(y1_i) # <----------------
-            if not silent:
-                print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+#         if batch % 100 == 0:
+#             loss, current = loss.item(), batch * len(y1_i) # <----------------
+#             if not silent:
+#                 print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
 
                 
-def train_error(dataloader, model, loss_fn, silent = False):
-    size = len(dataloader.dataset)
-    num_batches = len(dataloader)
-    train_loss = 0
+# def train_error(dataloader, model, loss_fn, silent = False):
+#     size = len(dataloader.dataset)
+#     num_batches = len(dataloader)
+#     train_loss = 0
 
-    with torch.no_grad():
-        for xs_i, y1_i, y2_i, y3_i in dataloader:
-            pred = model(xs_i)
-            train_loss += loss_fn(pred, y1_i).item() # <----------------------
+#     with torch.no_grad():
+#         for xs_i, y1_i, y2_i, y3_i in dataloader:
+#             pred = model(xs_i)
+#             train_loss += loss_fn(pred, y1_i).item() # <----------------------
             
-    train_loss /= num_batches
-    return(train_loss) 
+#     train_loss /= num_batches
+#     return(train_loss) 
 
             
-def test_loop(dataloader, model, loss_fn, silent = False):
-    size = len(dataloader.dataset)
-    num_batches = len(dataloader)
-    test_loss = 0
+# def test_loop(dataloader, model, loss_fn, silent = False):
+#     size = len(dataloader.dataset)
+#     num_batches = len(dataloader)
+#     test_loss = 0
 
-    with torch.no_grad():
-        for xs_i, y1_i, y2_i, y3_i in dataloader:
-            pred = model(xs_i)
-            test_loss += loss_fn(pred, y1_i).item() # <-----------------------
+#     with torch.no_grad():
+#         for xs_i, y1_i, y2_i, y3_i in dataloader:
+#             pred = model(xs_i)
+#             test_loss += loss_fn(pred, y1_i).item() # <-----------------------
 
-    test_loss /= num_batches
-    if not silent:
-        print(f"Test Error: Avg loss: {test_loss:>8f}")
-    return(test_loss) 
+#     test_loss /= num_batches
+#     if not silent:
+#         print(f"Test Error: Avg loss: {test_loss:>8f}")
+#     return(test_loss) 
 
-def train_nn(
-    training_dataloader,
-    testing_dataloader,
-    model,
-    learning_rate = 1e-3,
-    batch_size = 64,
-    epochs = 500
-):
-    # Initialize the loss function
-    loss_fn = nn.MSELoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+# def train_nn(
+#     training_dataloader,
+#     testing_dataloader,
+#     model,
+#     learning_rate = 1e-3,
+#     batch_size = 64,
+#     epochs = 500
+# ):
+#     # Initialize the loss function
+#     loss_fn = nn.MSELoss()
+#     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
-    loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
-    loss_df['TrainMSE'] = np.nan
-    loss_df['TestMSE']  = np.nan
+#     loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
+#     loss_df['TrainMSE'] = np.nan
+#     loss_df['TestMSE']  = np.nan
 
-    for t in tqdm(range(epochs)):        
-#         print(f"Epoch {t+1}\n-------------------------------")
-        train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
+#     for t in tqdm(range(epochs)):        
+# #         print(f"Epoch {t+1}\n-------------------------------")
+#         train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
 
-        loss_df.loc[loss_df.index == t, 'TrainMSE'
-                   ] = train_error(training_dataloader, model, loss_fn, silent = True)
+#         loss_df.loc[loss_df.index == t, 'TrainMSE'
+#                    ] = train_error(training_dataloader, model, loss_fn, silent = True)
         
-        loss_df.loc[loss_df.index == t, 'TestMSE'
-                   ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
+#         loss_df.loc[loss_df.index == t, 'TestMSE'
+#                    ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
         
-        if (t+1)%10: # Cache in case training is interupted
-#             print(loss_df.loc[loss_df.index == t, ['TrainMSE', 'TestMSE']])
-            torch.save(model.state_dict(), 
-                       '../models/'+nb_name+'/model_'+str(t)+'_'+str(epochs)+'.pt') # convention is to use .pt or .pth
+#         if (t+1)%10: # Cache in case training is interupted
+# #             print(loss_df.loc[loss_df.index == t, ['TrainMSE', 'TestMSE']])
+#             torch.save(model.state_dict(), 
+#                        '../models/'+nb_name+'/model_'+str(t)+'_'+str(epochs)+'.pt') # convention is to use .pt or .pth
         
-    return([model, loss_df])
+#     return([model, loss_df])
+
+
+
+# # don't run if either of these exist because there may be cases where we want the results but not the model
+
+# if not os.path.exists('../models/'+nb_name+'/model.pt'): 
+#     model = NeuralNetwork().to(device)
+
+#     model, loss_df = train_nn(
+#         nb_name,
+#         training_dataloader,
+#         testing_dataloader,
+#         model,
+#         learning_rate = 1e-3,
+#         batch_size = dataloader_batch_size,
+#         epochs = run_epochs
+#     )
+    
+#     # experimental outputs:
+#     # 1. Model
+#     torch.save(model.state_dict(), '../models/'+nb_name+'/model.pt') # convention is to use .pt or .pth
+
+#     # 2. loss_df
+#     loss_df.to_csv('../reports/'+nb_name+'/loss_df.csv', index=False)  
+    
+    
+#     # 3. predictions 
+#     yhats = pd.concat([
+#         yhat_loop(testing_dataloader, model).assign(Split = 'Test'),
+#         yhat_loop(training_dataloader, model).assign(Split = 'Train')], axis = 0)
+
+#     yhats.to_csv('../reports/'+nb_name+'/yhats.csv', index=False)
 
 # don't run if either of these exist because there may be cases where we want the results but not the model
 
 if not os.path.exists('../models/'+nb_name+'/model.pt'): 
+    # Shared setup (train from scratch and load latest)
+    model = NeuralNetwork()
+
+    # find the biggest model to save
+    saved_models = os.listdir('../models/'+nb_name+'/')
+    saved_models = [e for e in saved_models if re.match('model*', e)]
+
+    if saved_models == []:
+        epochs_run = 0
+    else:
+        # if there are saved models reload and resume training
+        saved_models_numbers = [int(e.replace('model_', ''
+                                    ).replace('.pt', ''
+                                    ).split('_')[0]) for e in saved_models]
+        # saved_models
+        epochs_run = max(saved_models_numbers)+1 # add 1 to account for 0 index
+        latest_model = [e for e in saved_models if re.match(
+            '^model_'+str(epochs_run-1)+'_.*\.pt$', e)][0] # subtract 1 to convert back
+        model.load_state_dict(torch.load('../models/'+nb_name+'/'+latest_model))
+        print('Resuming Training: '+str(epochs_run)+'/'+str(run_epochs)+' epochs run.')
+    
+    model.to(device)
+#     model = NeuralNetwork().to(device)
 
     model, loss_df = train_nn(
+        nb_name,
         training_dataloader,
         testing_dataloader,
         model,
         learning_rate = 1e-3,
-        batch_size = 64,
-        epochs = 20
+        batch_size = dataloader_batch_size,
+        epochs = (run_epochs - epochs_run)
     )
     
     # experimental outputs:
@@ -328,6 +353,15 @@ if not os.path.exists('../models/'+nb_name+'/model.pt'):
 
     # 2. loss_df
     loss_df.to_csv('../reports/'+nb_name+'/loss_df.csv', index=False)  
+    
+    # 3. predictions 
+    yhats = pd.concat([
+        yhat_loop(testing_dataloader, model).assign(Split = 'Test'),
+        yhat_loop(training_dataloader, model).assign(Split = 'Train')], axis = 0)
+
+    yhats.to_csv('../reports/'+nb_name+'/yhats.csv', index=False)
+
+NeuralNetwork()
 
 # model, loss_df = train_nn(
 #     training_dataloader,
@@ -381,6 +415,10 @@ if not os.path.exists('../models/'+nb_name+'/model.pt'):
 
 loss_df = pd.read_csv('../reports/'+nb_name+'/loss_df.csv')
 
+loss_df.TrainMSE = reverse_cs(loss_df.TrainMSE, scale_dict['y1'])
+loss_df.TestMSE  = reverse_cs(loss_df.TestMSE , scale_dict['y1'])
+
+
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
                     mode='lines', name='Train'))
@@ -388,635 +426,21 @@ fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
                     mode='lines', name='Test'))
 fig.show()
 
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=loss_df.Epoch, 
-                         y= reverse_cs(loss_df.TrainMSE, 
-                                       scale_dict['y1']),
-                         mode='lines', name='Train'))
-fig.add_trace(go.Scatter(x=loss_df.Epoch, 
-                         y= reverse_cs(loss_df.TestMSE, 
-                                       scale_dict['y1']),
-                         mode='lines', name='Test'))
-fig.show()
+yhats = pd.read_csv('../reports/'+nb_name+'/yhats.csv')
 
+yhats.y_true = reverse_cs(yhats.y_true, scale_dict['y1'])
+yhats.y_pred = reverse_cs(yhats.y_pred, scale_dict['y1'])
 
+px.scatter(yhats, x = 'y_true', y = 'y_pred', color = 'Split', trendline="ols")
 
+yhats['Error'] = yhats.y_true - yhats.y_pred
 
+px.histogram(yhats, x = 'Error', color = 'Split',
+             marginal="rug", # can be `box`, `violin`
+             nbins= 50)
 
-
-
-# # ! conda install captum -c pytorch -y
-
-
-# # imports from captum library
-# from captum.attr import LayerConductance, LayerActivation, LayerIntegratedGradients
-# from captum.attr import IntegratedGradients, DeepLift, GradientShap, NoiseTunnel, FeatureAblation
-
-
-
-# ig = IntegratedGradients(model)
-# ig_nt = NoiseTunnel(ig)
-# dl = DeepLift(model)
-# gs = GradientShap(model)
-# fa = FeatureAblation(model)
-
-# ig_attr_test = ig.attribute(xs_test, n_steps=50)
-# ig_nt_attr_test = ig_nt.attribute(xs_test)
-# dl_attr_test = dl.attribute(xs_test)
-# gs_attr_test = gs.attribute(xs_test, xs_train)
-# fa_attr_test = fa.attribute(xs_test)
-
-# [e.shape for e in [ig_attr_test,
-# ig_nt_attr_test,
-# dl_attr_test,
-# gs_attr_test,
-# fa_attr_test]]
-
-# fig = go.Figure()
-# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
-#                          y = ig_nt_attr_test.cpu().detach().numpy().mean(axis=0),
-#                          mode='lines', name='Test'))
-# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
-#                          y = dl_attr_test.cpu().detach().numpy().mean(axis=0),
-#                          mode='lines', name='Test'))
-# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
-#                          y = gs_attr_test.cpu().detach().numpy().mean(axis=0),
-#                          mode='lines', name='Test'))
-# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
-#                          y = fa_attr_test.cpu().detach().numpy().mean(axis=0),
-#                          mode='lines', name='Test'))
-# fig.show()
-
-# len(dl_attr_test.cpu().detach().numpy().mean(axis = 0))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ## Version 2, Predict `y1` (Anthesis), `y2` (Silking), and `y3` (ASI)
-
-# Here each model will predict 3 values. The loss function is still mse, but the y tensors are concatenated
-
-# class NeuralNetwork(nn.Module):
-#     def __init__(self):
-#         super(NeuralNetwork, self).__init__()    
-#         self.x_network = nn.Sequential(
-#             nn.Linear(1106, 64),
-#             nn.BatchNorm1d(64),
-#             nn.ReLU(),
-#             nn.Linear(64, 3))
-        
-#     def forward(self, x):
-#         x_out = self.x_network(x)
-#         return x_out
-
-# model = NeuralNetwork().to(device)
-# # print(model)
-
-# xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
-# model(xs_i).shape # try prediction on one batch
-
-
-
-
-
-# def train_loop(dataloader, model, loss_fn, optimizer, silent = False):
-#     size = len(dataloader.dataset)
-#     for batch, (xs_i, y1_i, y2_i, y3_i) in enumerate(dataloader):
-#         # Compute prediction and loss
-#         pred = model(xs_i)
-#         loss = loss_fn(pred, torch.concat([y1_i, y2_i, y3_i], axis = 1)) # <----------------------------------------
-
-#         # Backpropagation
-#         optimizer.zero_grad()
-#         loss.backward()
-#         optimizer.step()
-
-#         if batch % 100 == 0:
-#             loss, current = loss.item(), batch * len(y1_i) # <----------------
-#             if not silent:
-#                 print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
-
-                
-# def train_error(dataloader, model, loss_fn, silent = False):
-#     size = len(dataloader.dataset)
-#     num_batches = len(dataloader)
-#     train_loss = 0
-
-#     with torch.no_grad():
-#         for xs_i, y1_i, y2_i, y3_i in dataloader:
-#             pred = model(xs_i)
-#             train_loss += loss_fn(pred, torch.concat([y1_i, y2_i, y3_i], axis = 1)).item() # <----------------------
-            
-#     train_loss /= num_batches
-#     return(train_loss) 
-
-            
-# def test_loop(dataloader, model, loss_fn, silent = False):
-#     size = len(dataloader.dataset)
-#     num_batches = len(dataloader)
-#     test_loss = 0
-
-#     with torch.no_grad():
-#         for xs_i, y1_i, y2_i, y3_i in dataloader:
-#             pred = model(xs_i)
-#             test_loss += loss_fn(pred, torch.concat([y1_i, y2_i, y3_i], axis = 1)).item() # <-----------------------
-
-#     test_loss /= num_batches
-#     if not silent:
-#         print(f"Test Error: Avg loss: {test_loss:>8f}")
-#     return(test_loss) 
-
-
-# def train_nn(
-#     training_dataloader,
-#     testing_dataloader,
-#     model,
-#     learning_rate = 1e-3,
-#     batch_size = 64,
-#     epochs = 500
-# ):
-#     # Initialize the loss function
-#     loss_fn = nn.MSELoss()
-#     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
-
-#     loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
-#     loss_df['TrainMSE'] = np.nan
-#     loss_df['TestMSE']  = np.nan
-
-#     for t in tqdm.tqdm(range(epochs)):
-#         # print(f"Epoch {t+1}\n-------------------------------")
-#         train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
-
-#         loss_df.loc[loss_df.index == t, 'TrainMSE'
-#                    ] = train_error(training_dataloader, model, loss_fn, silent = True)
-        
-#         loss_df.loc[loss_df.index == t, 'TestMSE'
-#                    ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
-        
-#     return([model, loss_df])
-
-# model, loss_df = train_nn(
-#     training_dataloader,
-#     testing_dataloader,
-#     model,
-#     learning_rate = 1e-3,
-#     batch_size = 64,
-#     epochs = 500
-# )
-
-# fig = go.Figure()
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
-#                     mode='lines', name='Train'))
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
-#                     mode='lines', name='Test'))
-# fig.show()
-
-# model, loss_df = train_nn(
-#     training_dataloader,
-#     testing_dataloader,
-#     model,
-#     learning_rate = 1e-3,
-#     batch_size = 64,
-#     epochs = 5000
-# )
-
-# fig = go.Figure()
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
-#                     mode='lines', name='Train'))
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
-#                     mode='lines', name='Test'))
-# fig.show()
-
-
-
-
-
-# '../ext_data/zma/panzea/phenotypes/'
-
-# # pd.read_table('../ext_data/zma/panzea/phenotypes/traitMatrix_maize282NAM_v15-130212.txt', low_memory = False)
-
-# # pd.read_excel('../ext_data/zma/panzea/phenotypes/traitMatrix_maize282NAM_v15-130212_TraitDescritptions.xlsx')
-
-
-
-
-
-
-
-
-
-
-
-
-
-# data = pd.read_table('../ext_data/zma/panzea/phenotypes/Buckler_etal_2009_Science_flowering_time_data-090807/markergenotypes062508.txt', skiprows=1
-#                     ).reset_index().rename(columns = {'index': 'Geno_Code'})
-# data
-
-# px.scatter_matrix(data.loc[:, ['days2anthesis', 'days2silk', 'asi']])
-
-# d2a = np.array(data['days2anthesis'])
-# d2s = np.array(data['days2silk'])
-# asi = np.array(data['asi'])
-
-# xs = np.array(data.drop(columns = ['days2anthesis', 'days2silk', 'asi', 'pop', 'Geno_Code']))
-
-# n_obs = xs.shape[0]
-
-# np_seed = 9070707
-# rng = np.random.default_rng(np_seed)  # can be called without a seed
-
-# test_pr = 0.2
-
-# test_n = round(n_obs*test_pr)
-# idxs = np.linspace(0, n_obs-1, num = n_obs).astype(int)
-# rng.shuffle(idxs)
-
-# test_idxs = idxs[0:test_n]
-# train_idxs = idxs[test_n:-1]
-
-# y1_train = torch.from_numpy(y1[train_idxs]).to(device).float()[:, None]
-# y2_train = torch.from_numpy(y2[train_idxs]).to(device).float()[:, None]
-# y3_train = torch.from_numpy(y3[train_idxs]).to(device).float()[:, None]
-# xs_train = torch.from_numpy(xs[train_idxs]).to(device).float()
-
-# y1_test = torch.from_numpy(y1[test_idxs]).to(device).float()[:, None]
-# y2_test = torch.from_numpy(y2[test_idxs]).to(device).float()[:, None]
-# y3_test = torch.from_numpy(y3[test_idxs]).to(device).float()[:, None]
-# xs_test = torch.from_numpy(xs[test_idxs]).to(device).float()
-
-# class CustomDataset(Dataset):
-#     def __init__(self, y1, y2, y3, xs, transform = None, target_transform = None):
-#         self.y1 = y1
-#         self.y2 = y2
-#         self.y3 = y3
-#         self.xs = xs
-#         self.transform = transform
-#         self.target_transform = target_transform    
-    
-#     def __len__(self):
-#         return len(self.y1)
-    
-#     def __getitem__(self, idx):
-#         y1_idx = self.y1[idx]
-#         y2_idx = self.y2[idx]
-#         y3_idx = self.y3[idx]
-#         xs_idx = self.xs[idx]
-        
-#         if self.transform:
-#             xs_idx = self.transform(xs_idx)
-            
-#         if self.target_transform:
-#             y1_idx = self.transform(y1_idx)
-#             y2_idx = self.transform(y2_idx)
-#             y3_idx = self.transform(y3_idx)
-#         return xs_idx, y1_idx, y2_idx, y3_idx
-
-# training_dataloader = DataLoader(
-#     CustomDataset(
-#         y1 = y1_train,
-#         y2 = y2_train,
-#         y3 = y3_train,
-#         xs = xs_train
-#     ), 
-#     batch_size = 64, 
-#     shuffle = True)
-
-# testing_dataloader = DataLoader(
-#     CustomDataset(
-#         y1 = y1_test,
-#         y2 = y2_test,
-#         y3 = y3_test,
-#         xs = xs_test
-#     ), 
-#     batch_size = 64, 
-#     shuffle = True)
-
-# xs.shape
-
-# class NeuralNetwork(nn.Module):
-#     def __init__(self):
-#         super(NeuralNetwork, self).__init__()    
-#         self.x_network = nn.Sequential(
-#             nn.Linear(1106, 64),
-#             nn.BatchNorm1d(64),
-#             nn.ReLU(),
-#             nn.Linear(64, 1))
-        
-#     def forward(self, x):
-#         x_out = self.x_network(x)
-#         return x_out
-
-# model = NeuralNetwork().to(device)
-# # print(model)
-
-# xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
-# model(xs_i).shape # try prediction on one batch
-
-# def train_loop(dataloader, model, loss_fn, optimizer, silent = False):
-#     size = len(dataloader.dataset)
-#     for batch, (xs_i, y1_i, y2_i, y3_i) in enumerate(dataloader):
-#         # Compute prediction and loss
-#         pred = model(xs_i)
-#         loss = loss_fn(pred, y1_i) # <----------------------------------------
-
-#         # Backpropagation
-#         optimizer.zero_grad()
-#         loss.backward()
-#         optimizer.step()
-
-#         if batch % 100 == 0:
-#             loss, current = loss.item(), batch * len(y1_i) # <----------------
-#             if not silent:
-#                 print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
-
-                
-# def train_error(dataloader, model, loss_fn, silent = False):
-#     size = len(dataloader.dataset)
-#     num_batches = len(dataloader)
-#     train_loss = 0
-
-#     with torch.no_grad():
-#         for xs_i, y1_i, y2_i, y3_i in dataloader:
-#             pred = model(xs_i)
-#             train_loss += loss_fn(pred, y1_i).item() # <----------------------
-            
-#     train_loss /= num_batches
-#     return(train_loss) 
-
-            
-# def test_loop(dataloader, model, loss_fn, silent = False):
-#     size = len(dataloader.dataset)
-#     num_batches = len(dataloader)
-#     test_loss = 0
-
-#     with torch.no_grad():
-#         for xs_i, y1_i, y2_i, y3_i in dataloader:
-#             pred = model(xs_i)
-#             test_loss += loss_fn(pred, y1_i).item() # <-----------------------
-
-#     test_loss /= num_batches
-#     if not silent:
-#         print(f"Test Error: Avg loss: {test_loss:>8f}")
-#     return(test_loss) 
-
-
-# def train_nn(
-#     training_dataloader,
-#     testing_dataloader,
-#     model,
-#     learning_rate = 1e-3,
-#     batch_size = 64,
-#     epochs = 500
-# ):
-#     # Initialize the loss function
-#     loss_fn = nn.MSELoss()
-#     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
-
-#     loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
-#     loss_df['TrainMSE'] = np.nan
-#     loss_df['TestMSE']  = np.nan
-
-#     for t in tqdm.tqdm(range(epochs)):
-#         # print(f"Epoch {t+1}\n-------------------------------")
-#         train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
-
-#         loss_df.loc[loss_df.index == t, 'TrainMSE'
-#                    ] = train_error(training_dataloader, model, loss_fn, silent = True)
-        
-#         loss_df.loc[loss_df.index == t, 'TestMSE'
-#                    ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
-        
-#     return([model, loss_df])
-
-# model, loss_df = train_nn(
-#     training_dataloader,
-#     testing_dataloader,
-#     model,
-#     learning_rate = 1e-3,
-#     batch_size = 64,
-#     epochs = 500
-# )
-
-# fig = go.Figure()
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
-#                     mode='lines', name='Train'))
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
-#                     mode='lines', name='Test'))
-# fig.show()
-
-# # ! conda install captum -c pytorch -y
-
-
-# # imports from captum library
-# from captum.attr import LayerConductance, LayerActivation, LayerIntegratedGradients
-# from captum.attr import IntegratedGradients, DeepLift, GradientShap, NoiseTunnel, FeatureAblation
-
-
-
-# ig = IntegratedGradients(model)
-# ig_nt = NoiseTunnel(ig)
-# dl = DeepLift(model)
-# gs = GradientShap(model)
-# fa = FeatureAblation(model)
-
-# ig_attr_test = ig.attribute(xs_test, n_steps=50)
-# ig_nt_attr_test = ig_nt.attribute(xs_test)
-# dl_attr_test = dl.attribute(xs_test)
-# gs_attr_test = gs.attribute(xs_test, xs_train)
-# fa_attr_test = fa.attribute(xs_test)
-
-# [e.shape for e in [ig_attr_test,
-# ig_nt_attr_test,
-# dl_attr_test,
-# gs_attr_test,
-# fa_attr_test]]
-
-# fig = go.Figure()
-# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
-#                          y = ig_nt_attr_test.cpu().detach().numpy().mean(axis=0),
-#                          mode='lines', name='Test'))
-# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
-#                          y = dl_attr_test.cpu().detach().numpy().mean(axis=0),
-#                          mode='lines', name='Test'))
-# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
-#                          y = gs_attr_test.cpu().detach().numpy().mean(axis=0),
-#                          mode='lines', name='Test'))
-# fig.add_trace(go.Scatter(x = np.linspace(0, 1106-1, 1106),
-#                          y = fa_attr_test.cpu().detach().numpy().mean(axis=0),
-#                          mode='lines', name='Test'))
-# fig.show()
-
-# len(dl_attr_test.cpu().detach().numpy().mean(axis = 0))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ## Version 2, Predict `y1` (Anthesis), `y2` (Silking), and `y3` (ASI)
-
-# Here each model will predict 3 values. The loss function is still mse, but the y tensors are concatenated
-
-# class NeuralNetwork(nn.Module):
-#     def __init__(self):
-#         super(NeuralNetwork, self).__init__()    
-#         self.x_network = nn.Sequential(
-#             nn.Linear(1106, 64),
-#             nn.BatchNorm1d(64),
-#             nn.ReLU(),
-#             nn.Linear(64, 3))
-        
-#     def forward(self, x):
-#         x_out = self.x_network(x)
-#         return x_out
-
-# model = NeuralNetwork().to(device)
-# # print(model)
-
-# xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
-# model(xs_i).shape # try prediction on one batch
-
-
-
-
-
-# def train_loop(dataloader, model, loss_fn, optimizer, silent = False):
-#     size = len(dataloader.dataset)
-#     for batch, (xs_i, y1_i, y2_i, y3_i) in enumerate(dataloader):
-#         # Compute prediction and loss
-#         pred = model(xs_i)
-#         loss = loss_fn(pred, torch.concat([y1_i, y2_i, y3_i], axis = 1)) # <----------------------------------------
-
-#         # Backpropagation
-#         optimizer.zero_grad()
-#         loss.backward()
-#         optimizer.step()
-
-#         if batch % 100 == 0:
-#             loss, current = loss.item(), batch * len(y1_i) # <----------------
-#             if not silent:
-#                 print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
-
-                
-# def train_error(dataloader, model, loss_fn, silent = False):
-#     size = len(dataloader.dataset)
-#     num_batches = len(dataloader)
-#     train_loss = 0
-
-#     with torch.no_grad():
-#         for xs_i, y1_i, y2_i, y3_i in dataloader:
-#             pred = model(xs_i)
-#             train_loss += loss_fn(pred, torch.concat([y1_i, y2_i, y3_i], axis = 1)).item() # <----------------------
-            
-#     train_loss /= num_batches
-#     return(train_loss) 
-
-            
-# def test_loop(dataloader, model, loss_fn, silent = False):
-#     size = len(dataloader.dataset)
-#     num_batches = len(dataloader)
-#     test_loss = 0
-
-#     with torch.no_grad():
-#         for xs_i, y1_i, y2_i, y3_i in dataloader:
-#             pred = model(xs_i)
-#             test_loss += loss_fn(pred, torch.concat([y1_i, y2_i, y3_i], axis = 1)).item() # <-----------------------
-
-#     test_loss /= num_batches
-#     if not silent:
-#         print(f"Test Error: Avg loss: {test_loss:>8f}")
-#     return(test_loss) 
-
-
-# def train_nn(
-#     training_dataloader,
-#     testing_dataloader,
-#     model,
-#     learning_rate = 1e-3,
-#     batch_size = 64,
-#     epochs = 500
-# ):
-#     # Initialize the loss function
-#     loss_fn = nn.MSELoss()
-#     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
-
-#     loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
-#     loss_df['TrainMSE'] = np.nan
-#     loss_df['TestMSE']  = np.nan
-
-#     for t in tqdm.tqdm(range(epochs)):
-#         # print(f"Epoch {t+1}\n-------------------------------")
-#         train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
-
-#         loss_df.loc[loss_df.index == t, 'TrainMSE'
-#                    ] = train_error(training_dataloader, model, loss_fn, silent = True)
-        
-#         loss_df.loc[loss_df.index == t, 'TestMSE'
-#                    ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
-        
-#     return([model, loss_df])
-
-# model, loss_df = train_nn(
-#     training_dataloader,
-#     testing_dataloader,
-#     model,
-#     learning_rate = 1e-3,
-#     batch_size = 64,
-#     epochs = 500
-# )
-
-# fig = go.Figure()
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
-#                     mode='lines', name='Train'))
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
-#                     mode='lines', name='Test'))
-# fig.show()
-
-# model, loss_df = train_nn(
-#     training_dataloader,
-#     testing_dataloader,
-#     model,
-#     learning_rate = 1e-3,
-#     batch_size = 64,
-#     epochs = 5000
-# )
-
-# fig = go.Figure()
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
-#                     mode='lines', name='Train'))
-# fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
-#                     mode='lines', name='Test'))
-# fig.show()
-
-
-
-
-
-# '../ext_data/zma/panzea/phenotypes/'
-
-# # pd.read_table('../ext_data/zma/panzea/phenotypes/traitMatrix_maize282NAM_v15-130212.txt', low_memory = False)
-
-# # pd.read_excel('../ext_data/zma/panzea/phenotypes/traitMatrix_maize282NAM_v15-130212_TraitDescritptions.xlsx')
+# automatically kill kernel after running. 
+# This is a hacky way to free up _all_ space on the gpus
+os._exit(00)
 
 

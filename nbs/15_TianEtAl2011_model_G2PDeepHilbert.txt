@@ -1,0 +1,458 @@
+# Hacky way to schedule. Here I'm setting these to sleep until the gpus should be free.
+# At the end of the notebooks  os._exit(00) will kill the kernel freeing the gpu. 
+#                          Hours to wait
+# import time; time.sleep( 24 * (60*60))
+
+# Run Settings:
+nb_name = '15_TianEtAl2011'# Set manually! -----------------------------------
+
+downsample_obs = False
+train_n = 90
+test_n = 10
+
+dataloader_batch_size = 8 #16 #64
+run_epochs = 200
+
+use_gpu_num = 0
+
+# Imports --------------------------------------------------------------------
+import os
+import pandas as pd
+import numpy as np
+import re
+
+import torch
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+from torch import nn
+
+import tqdm
+from tqdm import tqdm
+
+import plotly.graph_objects as go
+import plotly.express as px
+import plotly.io as pio
+pio.templates.default = "plotly_white"
+
+
+import dlgwas
+from dlgwas.kegg import ensure_dir_path_exists
+from dlgwas.kegg import get_cached_result
+from dlgwas.kegg import put_cached_result
+
+from dlgwas.dlfn import calc_cs
+from dlgwas.dlfn import apply_cs
+from dlgwas.dlfn import reverse_cs
+
+from dlgwas.dlfn import TianEtAl2011Dataset
+from dlgwas.dlfn import train_loop
+from dlgwas.dlfn import train_error
+from dlgwas.dlfn import test_loop
+from dlgwas.dlfn import train_nn
+from dlgwas.dlfn import yhat_loop
+
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+if use_gpu_num in [0, 1]: 
+    torch.cuda.set_device(use_gpu_num)
+print(f"Using {device} device")
+
+
+ensure_dir_path_exists(dir_path = '../models/'+nb_name)
+ensure_dir_path_exists(dir_path = '../reports/'+nb_name)
+
+ensure_dir_path_exists(dir_path = '../models/'+nb_name)
+ensure_dir_path_exists(dir_path = '../reports/'+nb_name)
+
+# Read in cleaned data
+taxa_groupings = pd.read_csv('../models/10_TianEtAl2011/taxa_groupings.csv')
+data           = pd.read_csv('../models/10_TianEtAl2011/clean_data.csv')
+
+# Define holdout sets (Populations)
+uniq_pop = list(set(taxa_groupings['Population']))
+print(str(len(uniq_pop))+" Unique Holdout Groups.")
+taxa_groupings['Holdout'] = None
+for i in range(len(uniq_pop)):
+    mask = (taxa_groupings['Population'] == uniq_pop[i])
+    taxa_groupings.loc[mask, 'Holdout'] = i
+
+taxa_groupings
+
+#randomly holdout a population if there is not a file with the population held out.
+# Holdout_Int = 0
+Holdout_Int_path = '../models/'+nb_name+'/holdout_pop_int.pkl'
+if None != get_cached_result(Holdout_Int_path):
+    Holdout_Int = get_cached_result(Holdout_Int_path)
+else:
+    Holdout_Int = int(np.random.choice([i for i in range(len(uniq_pop))], 1))
+    put_cached_result(Holdout_Int_path, Holdout_Int)
+
+    
+print("Holding out i="+str(Holdout_Int)+": "+uniq_pop[Holdout_Int])
+
+mask = (taxa_groupings['Holdout'] == Holdout_Int)
+train_idxs = list(taxa_groupings.loc[~mask, ].index)
+test_idxs = list(taxa_groupings.loc[mask, ].index)
+
+# downsample_obs = True
+# train_n = 900
+# test_n = 100
+
+if downsample_obs == True:
+    train_idxs = np.random.choice(train_idxs, train_n)
+    test_idxs = np.random.choice(test_idxs, test_n)
+    print([len(e) for e in [test_idxs, train_idxs]])
+    
+# used to go from index in tensor to index in data so that the right xs tensor can be loaded in
+idx_original = np.array(data.index)
+
+y1 = data['leaf_length']
+y2 = data['leaf_width']
+y3 = data['upper_leaf_angle']
+y1 = np.array(y1)
+y2 = np.array(y2)
+y3 = np.array(y3)
+
+scale_dict_path = '../models/'+nb_name+'/scale_dict.pkl'
+if None != get_cached_result(scale_dict_path):
+    scale_dict = get_cached_result(scale_dict_path)
+else:
+    scale_dict = {
+        'y1':calc_cs(y1[train_idxs]),
+        'y2':calc_cs(y2[train_idxs]),
+        'y3':calc_cs(y3[train_idxs])
+    }
+    put_cached_result(scale_dict_path, scale_dict)
+
+y1 = apply_cs(y1, scale_dict['y1'])
+y2 = apply_cs(y2, scale_dict['y2'])
+y3 = apply_cs(y3, scale_dict['y3'])
+
+# loading this into memory causes the session to crash
+
+y1_train = torch.from_numpy(y1[train_idxs])[:, None]
+y2_train = torch.from_numpy(y2[train_idxs])[:, None]
+y3_train = torch.from_numpy(y3[train_idxs])[:, None]
+
+idx_original_train = torch.from_numpy(idx_original[train_idxs])
+
+y1_test = torch.from_numpy(y1[test_idxs])[:, None]
+y2_test = torch.from_numpy(y2[test_idxs])[:, None]
+y3_test = torch.from_numpy(y3[test_idxs])[:, None]
+
+idx_original_test = torch.from_numpy(idx_original[test_idxs])
+
+
+# dataloader_batch_size = 64
+
+training_dataloader = DataLoader(
+    TianEtAl2011Dataset(
+        y1 = y1_train,
+        y2 = y2_train,
+        y3 = y3_train,
+        marker_type = 'hilbert',
+        idx_original = idx_original_train,
+        use_gpu_num = use_gpu_num,
+#         device = 'cpu'
+    ), 
+    batch_size = dataloader_batch_size, 
+    shuffle = True)
+
+testing_dataloader = DataLoader(
+    TianEtAl2011Dataset(
+        y1 = y1_test,
+        y2 = y2_test,
+        y3 = y3_test,
+        marker_type = 'hilbert',
+        idx_original = idx_original_test,
+        use_gpu_num = use_gpu_num,
+#         device = 'cpu'
+    ), 
+    batch_size = dataloader_batch_size, 
+    shuffle = True)
+
+class NeuralNetwork(nn.Module):
+    def __init__(self):
+        super(NeuralNetwork, self).__init__()    
+
+        # Block 1 ------------------------------------------------------------
+        self.long_way_0 = nn.Sequential(
+            nn.Conv2d(
+                    in_channels= 4, # second channel
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride= 2,
+                    bias = True
+                ),
+#             nn.BatchNorm1d(4),
+            nn.Conv2d(
+                    in_channels= 4, 
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride= 1,
+                    padding = 1,
+                    bias = True
+                ),
+#             nn.BatchNorm1d(4),
+            nn.Dropout(p=0.75)
+            )
+        
+        self.shortcut_0 = nn.Sequential(
+            nn.Conv2d(
+                    in_channels= 4, 
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride= 2,
+                    bias = True
+                )
+        )
+        # Block 2 ------------------------------------------------------------
+        self.long_way_1 = nn.Sequential(
+            nn.Conv2d(
+                    in_channels= 4, # second channel
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride= 2,
+                    bias = True
+                ),
+#             nn.BatchNorm1d(4),
+            nn.Conv2d(
+                    in_channels= 4, 
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride= 1,
+                    padding = 1,
+                    bias = True
+                ),
+#             nn.BatchNorm1d(4),
+            nn.Dropout(p=0.75)
+            )
+        
+        self.shortcut_1 = nn.Sequential(
+            nn.Conv2d(
+                    in_channels= 4, 
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride= 2,
+                    bias = True
+                )
+        )
+        # Block 3 ------------------------------------------------------------
+        self.long_way_2 = nn.Sequential(
+            nn.Conv2d(
+                    in_channels= 4, # second channel
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride= 2,
+                    bias = True
+                ),
+#             nn.BatchNorm1d(4),
+            nn.Conv2d(
+                    in_channels= 4, 
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride= 1,
+                    padding = 1,
+                    bias = True
+                ),
+#             nn.BatchNorm1d(4),
+            nn.Dropout(p=0.75)
+            )
+        
+        self.shortcut_2 = nn.Sequential(
+            nn.Conv2d(
+                    in_channels= 4, 
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride= 2,
+                    bias = True
+                )
+        )        
+        
+        
+        self.feature_processing = nn.Sequential(
+            nn.Conv2d(
+                    in_channels= 4, 
+                    out_channels= 4,
+                    kernel_size= (3, 3),
+                    stride = 2,
+                    bias = True
+                ),
+            nn.Dropout(p=0.75)
+        )
+
+        self.output_processing = nn.Sequential(
+            nn.Flatten(),
+            nn.ReLU(), # They used inverse square root activation $y = \frac{x}{\sqrt{1+ax^2}}$
+            nn.Dropout(p=0.75),
+            nn.Linear(15876, 1)
+        )            
+        
+    def forward(self, x):
+        x_out = self.long_way_0(x)
+        x_shortcut = self.shortcut_0(x)
+        x_out += x_shortcut
+        
+        x = x_out
+        x_out = self.long_way_1(x)
+        x_shortcut = self.shortcut_1(x)
+        x_out += x_shortcut
+        
+        x = x_out
+        x_out = self.long_way_2(x)
+        x_shortcut = self.shortcut_2(x)        
+        x_out += x_shortcut
+        
+        x_out = self.feature_processing(x_out)
+        x_out = self.output_processing(x_out)
+        
+        return x_out
+
+# xs_i, y1_i, y2_i, y3_i = next(iter(training_dataloader))
+
+# model = NeuralNetwork().to(device)
+
+# res = model(xs_i) # try prediction on one batch
+# res.shape
+
+
+
+
+
+def train_nn(
+    nb_name,
+    training_dataloader,
+    testing_dataloader,
+    model,
+    learning_rate = 1e-3,
+    batch_size = 64,
+    epochs = 500
+):
+    # Initialize the loss function
+    loss_fn = nn.MSELoss()
+#     optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+
+    # Optimizer with L2 normalization
+    optimizer = torch.optim.Adam([
+        {'params':model.long_way_0.parameters(), 'weight_decay': 0.1},
+        {'params':model.shortcut_0.parameters(), 'weight_decay': 0.1},
+        {'params':model.long_way_1.parameters(), 'weight_decay': 0.1},
+        {'params':model.shortcut_1.parameters(), 'weight_decay': 0.1},
+        {'params':model.long_way_2.parameters(), 'weight_decay': 0.1},
+        {'params':model.shortcut_2.parameters(), 'weight_decay': 0.1},
+        {'params':model.feature_processing.parameters(),        'weight_decay': 0.1},
+        {'params':model.output_processing.parameters(),         'weight_decay': 0.01},
+    ], lr=learning_rate)
+
+    loss_df = pd.DataFrame([i for i in range(epochs)], columns = ['Epoch'])
+    loss_df['TrainMSE'] = np.nan
+    loss_df['TestMSE']  = np.nan
+
+    for t in tqdm(range(epochs)):        
+#         print(f"Epoch {t+1}\n-------------------------------")
+        train_loop(training_dataloader, model, loss_fn, optimizer, silent = True)
+
+        loss_df.loc[loss_df.index == t, 'TrainMSE'
+                   ] = train_error(training_dataloader, model, loss_fn, silent = True)
+        
+        loss_df.loc[loss_df.index == t, 'TestMSE'
+                   ] = test_loop(testing_dataloader, model, loss_fn, silent = True)
+        
+        if (t+1)%10: # Cache in case training is interupted
+#             print(loss_df.loc[loss_df.index == t, ['TrainMSE', 'TestMSE']])
+            torch.save(model.state_dict(), 
+                       '../models/'+nb_name+'/model_'+str(t)+'_'+str(epochs)+'.pt') # convention is to use .pt or .pth
+            loss_df.to_csv('../reports/'+nb_name+'/loss_df'+str(t)+'_'+str(epochs)+'.csv', index=False) 
+        
+    return([model, loss_df])
+
+
+
+# don't run if either of these exist because there may be cases where we want the results but not the model
+
+if not os.path.exists('../models/'+nb_name+'/model.pt'): 
+    # Shared setup (train from scratch and load latest)
+    model = NeuralNetwork()
+
+    # find the biggest model to save
+    saved_models = os.listdir('../models/'+nb_name+'/')
+    saved_models = [e for e in saved_models if re.match('model*', e)]
+
+    if saved_models == []:
+        epochs_run = 0
+    else:
+        # if there are saved models reload and resume training
+        saved_models_numbers = [int(e.replace('model_', ''
+                                    ).replace('.pt', ''
+                                    ).split('_')[0]) for e in saved_models]
+        # saved_models
+        epochs_run = max(saved_models_numbers)+1 # add 1 to account for 0 index
+        latest_model = [e for e in saved_models if re.match(
+            '^model_'+str(epochs_run-1)+'_.*\.pt$', e)][0] # subtract 1 to convert back
+        model.load_state_dict(torch.load('../models/'+nb_name+'/'+latest_model))
+        print('Resuming Training: '+str(epochs_run)+'/'+str(run_epochs)+' epochs run.')
+    
+    model.to(device)   
+
+    model, loss_df = train_nn(
+        nb_name,
+        training_dataloader,
+        testing_dataloader,
+        model,
+        learning_rate = 1e-3,
+        batch_size = dataloader_batch_size,
+        epochs = (run_epochs - epochs_run)
+    )
+    
+    # experimental outputs:
+    # 1. Model
+    torch.save(model.state_dict(), '../models/'+nb_name+'/model.pt') # convention is to use .pt or .pth
+
+    # 2. loss_df
+    loss_df.to_csv('../reports/'+nb_name+'/loss_df.csv', index=False)  
+    
+    
+    # 3. predictions 
+    yhats = pd.concat([
+        yhat_loop(testing_dataloader, model).assign(Split = 'Test'),
+        yhat_loop(training_dataloader, model).assign(Split = 'Train')], axis = 0)
+
+    yhats.to_csv('../reports/'+nb_name+'/yhats.csv', index=False)
+
+
+
+NeuralNetwork()
+
+loss_df = pd.read_csv('../reports/'+nb_name+'/loss_df.csv')
+
+loss_df.TrainMSE = reverse_cs(loss_df.TrainMSE, scale_dict['y1'])
+loss_df.TestMSE  = reverse_cs(loss_df.TestMSE , scale_dict['y1'])
+
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TestMSE,
+                    mode='lines', name='Test'))
+fig.add_trace(go.Scatter(x=loss_df.Epoch, y=loss_df.TrainMSE,
+                    mode='lines', name='Train'))
+fig.show()
+
+
+
+
+
+yhats = pd.read_csv('../reports/'+nb_name+'/yhats.csv')
+
+yhats.y_true = reverse_cs(yhats.y_true, scale_dict['y1'])
+yhats.y_pred = reverse_cs(yhats.y_pred, scale_dict['y1'])
+
+px.scatter(yhats, x = 'y_true', y = 'y_pred', color = 'Split', trendline="ols")
+
+yhats['Error'] = yhats.y_true - yhats.y_pred
+
+px.histogram(yhats, x = 'Error', color = 'Split',
+             marginal="box", # can be `rug`, `violin`
+             nbins= 50)
+
+# automatically kill kernel after running. 
+# This is a hacky way to free up _all_ space on the gpus
+# os._exit(00)
