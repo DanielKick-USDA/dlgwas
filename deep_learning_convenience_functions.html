@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.3.353">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="description" content="This notebook contains convenience functions to aid in modeling.">
+
+<title>dlgwas - Deep Learning Convenience Functions</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/headroom.min.js"></script>
+<script src="site_libs/clipboard/clipboard.min.js"></script>
+<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="site_libs/quarto-search/fuse.min.js"></script>
+<script src="site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="./">
+<script src="site_libs/quarto-html/quarto.js"></script>
+<script src="site_libs/quarto-html/popper.min.js"></script>
+<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="site_libs/quarto-html/anchor.min.js"></script>
+<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="site_libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 20,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit"
+  }
+}</script>
+
+
+<link rel="stylesheet" href="styles.css">
+<meta property="og:title" content="dlgwas - Deep Learning Convenience Functions">
+<meta property="og:description" content="This notebook contains convenience functions to aid in modeling.">
+<meta property="og:site-name" content="dlgwas">
+<meta name="twitter:title" content="dlgwas - Deep Learning Convenience Functions">
+<meta name="twitter:description" content="This notebook contains convenience functions to aid in modeling.">
+<meta name="twitter:card" content="summary">
+</head>
+
+<body class="nav-sidebar floating nav-fixed">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg navbar-dark ">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container">
+    <a class="navbar-brand" href="./index.html">
+    <span class="navbar-title">dlgwas</span>
+    </a>
+  </div>
+        <div class="quarto-navbar-tools ms-auto">
+</div>
+          <div id="quarto-search" class="" title="Search"></div>
+      </div> <!-- /container-fluid -->
+    </nav>
+  <nav class="quarto-secondary-nav">
+    <div class="container-fluid d-flex">
+      <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar,#quarto-sidebar-glass" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+        <i class="bi bi-layout-text-sidebar-reverse"></i>
+      </button>
+      <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./deep_learning_convenience_functions.html">Deep Learning Convenience Functions</a></li></ol></nav>
+      <a class="flex-grow-1" role="button" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar,#quarto-sidebar-glass" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
+      </a>
+    </div>
+  </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal sidebar-navigation floating overflow-auto">
+    <div class="sidebar-menu-container"> 
+    <ul class="list-unstyled mt-1">
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./index.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">dlgwas</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./core.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">core</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./zma_kegg_download.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">SNPS to Networks 1: KEGG</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./zma_retrieve_nucleotide_data.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Retrieve Nucleotide Data</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./zma_trial.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Retrieve genomic data for phenotypes</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./deep_learning_convenience_functions.html" class="sidebar-item-text sidebar-link active">
+ <span class="menu-text">Deep Learning Convenience Functions</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./tianetal2011.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Tian et al.&nbsp;2011</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./tianetal2011_model_simple.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Tian et al.&nbsp;2011 Model 1</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./tianetal2011_model_simple_cnn1d.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Tian et al.&nbsp;2011 Model 2</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./tianetal2011_model_g2pdeep.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Tian et al.&nbsp;2011 Model 3 (G2PDeep Inspired)</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./tianetal2011_model_g2pdeep3resblocks.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Tian et al.&nbsp;2011 Model 4 (G2PDeep Inspired, Smaller)</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./tianetal2011_model_g2pdeephilbert.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Tian et al.&nbsp;2011 Model 5 Conv. 2d Hilbert Curve</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./tianetal2011_model_g2pdeephilbert_nodropout.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Tian et al.&nbsp;2011 Model 5 Conv. 2d Hilbert Curve</span></a>
+  </div>
+</li>
+        <li class="sidebar-item">
+  <div class="sidebar-item-container"> 
+  <a href="./buckleretal2009.html" class="sidebar-item-text sidebar-link">
+ <span class="menu-text">Buckler et al.&nbsp;2009</span></a>
+  </div>
+</li>
+    </ul>
+    </div>
+</nav>
+<div id="quarto-sidebar-glass" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar,#quarto-sidebar-glass"></div>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#calc_cs" id="toc-calc_cs" class="nav-link active" data-scroll-target="#calc_cs">calc_cs</a></li>
+  <li><a href="#apply_cs" id="toc-apply_cs" class="nav-link" data-scroll-target="#apply_cs">apply_cs</a></li>
+  <li><a href="#reverse_cs" id="toc-reverse_cs" class="nav-link" data-scroll-target="#reverse_cs">reverse_cs</a></li>
+  <li><a href="#boilerplate-functions-for-tian-et-al-2011" id="toc-boilerplate-functions-for-tian-et-al-2011" class="nav-link" data-scroll-target="#boilerplate-functions-for-tian-et-al-2011">Boilerplate Functions for Tian et al 2011</a>
+  <ul class="collapse">
+  <li><a href="#tianetal2011dataset" id="toc-tianetal2011dataset" class="nav-link" data-scroll-target="#tianetal2011dataset">TianEtAl2011Dataset</a></li>
+  <li><a href="#train_loop" id="toc-train_loop" class="nav-link" data-scroll-target="#train_loop">train_loop</a></li>
+  <li><a href="#train_error" id="toc-train_error" class="nav-link" data-scroll-target="#train_error">train_error</a></li>
+  <li><a href="#test_loop" id="toc-test_loop" class="nav-link" data-scroll-target="#test_loop">test_loop</a></li>
+  <li><a href="#train_nn" id="toc-train_nn" class="nav-link" data-scroll-target="#train_nn">train_nn</a></li>
+  <li><a href="#yhat_loop" id="toc-yhat_loop" class="nav-link" data-scroll-target="#yhat_loop">yhat_loop</a></li>
+  </ul></li>
+  </ul>
+<div class="toc-actions"><div><i class="bi bi-github"></i></div><div class="action-links"><p><a href="https://github.com/DanielKick-USDA/dlgwas/issues/new" class="toc-action">Report an issue</a></p></div></div></nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Deep Learning Convenience Functions</h1>
+</div>
+
+<div>
+  <div class="description">
+    This notebook contains convenience functions to aid in modeling.
+  </div>
+</div>
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+</header>
+
+<!-- WARNING: THIS FILE WAS AUTOGENERATED! DO NOT EDIT! -->
+<hr>
+<p><a href="https://github.com/DanielKick-USDA/dlgwas/blob/main/dlgwas/dlfn.py#L8" target="_blank" style="float:right; font-size:smaller">source</a></p>
+<section id="calc_cs" class="level3">
+<h3 class="anchored" data-anchor-id="calc_cs">calc_cs</h3>
+<blockquote class="blockquote">
+<pre><code> calc_cs (x)</code></pre>
+</blockquote>
+<p>Calculate nan mean and nan std of an array. Returned as list</p>
+<table class="table">
+<thead>
+<tr class="header">
+<th></th>
+<th><strong>Details</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>x</td>
+<td>numeric array</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<p><a href="https://github.com/DanielKick-USDA/dlgwas/blob/main/dlgwas/dlfn.py#L15" target="_blank" style="float:right; font-size:smaller">source</a></p>
+</section>
+<section id="apply_cs" class="level3">
+<h3 class="anchored" data-anchor-id="apply_cs">apply_cs</h3>
+<blockquote class="blockquote">
+<pre><code> apply_cs (xs, cs_dict_entry)</code></pre>
+</blockquote>
+<table class="table">
+<thead>
+<tr class="header">
+<th></th>
+<th><strong>Details</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>xs</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>cs_dict_entry</td>
+<td>list of length 2 containing mean and s</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<p><a href="https://github.com/DanielKick-USDA/dlgwas/blob/main/dlgwas/dlfn.py#L20" target="_blank" style="float:right; font-size:smaller">source</a></p>
+</section>
+<section id="reverse_cs" class="level3">
+<h3 class="anchored" data-anchor-id="reverse_cs">reverse_cs</h3>
+<blockquote class="blockquote">
+<pre><code> reverse_cs (xs, cs_dict_entry)</code></pre>
+</blockquote>
+</section>
+<section id="boilerplate-functions-for-tian-et-al-2011" class="level2">
+<h2 class="anchored" data-anchor-id="boilerplate-functions-for-tian-et-al-2011">Boilerplate Functions for Tian et al 2011</h2>
+<hr>
+<p><a href="https://github.com/DanielKick-USDA/dlgwas/blob/main/dlgwas/dlfn.py#L33" target="_blank" style="float:right; font-size:smaller">source</a></p>
+<section id="tianetal2011dataset" class="level3">
+<h3 class="anchored" data-anchor-id="tianetal2011dataset">TianEtAl2011Dataset</h3>
+<blockquote class="blockquote">
+<pre><code> TianEtAl2011Dataset (y1, y2, y3, idx_original, marker_type='markers',
+                      transform=None, target_transform=None,
+                      use_gpu_num=0, **kwargs)</code></pre>
+</blockquote>
+<p>An abstract class representing a :class:<code>Dataset</code>.</p>
+<p>All datasets that represent a map from keys to data samples should subclass it. All subclasses should overwrite :meth:<code>__getitem__</code>, supporting fetching a data sample for a given key. Subclasses could also optionally overwrite :meth:<code>__len__</code>, which is expected to return the size of the dataset by many :class:<code>~torch.utils.data.Sampler</code> implementations and the default options of :class:<code>~torch.utils.data.DataLoader</code>.</p>
+<p>.. note:: :class:<code>~torch.utils.data.DataLoader</code> by default constructs a index sampler that yields integral indices. To make it work with a map-style dataset with non-integral indices/keys, a custom sampler must be provided.</p>
+<table class="table">
+<thead>
+<tr class="header">
+<th></th>
+<th><strong>Type</strong></th>
+<th><strong>Default</strong></th>
+<th><strong>Details</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>y1</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr class="even">
+<td>y2</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>y3</td>
+<td></td>
+<td></td>
+<td>xs,</td>
+</tr>
+<tr class="even">
+<td>idx_original</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>marker_type</td>
+<td>str</td>
+<td>markers</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>transform</td>
+<td>NoneType</td>
+<td>None</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>target_transform</td>
+<td>NoneType</td>
+<td>None</td>
+<td></td>
+</tr>
+<tr class="even">
+<td>use_gpu_num</td>
+<td>int</td>
+<td>0</td>
+<td></td>
+</tr>
+<tr class="odd">
+<td>kwargs</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<p><a href="https://github.com/DanielKick-USDA/dlgwas/blob/main/dlgwas/dlfn.py#L109" target="_blank" style="float:right; font-size:smaller">source</a></p>
+</section>
+<section id="train_loop" class="level3">
+<h3 class="anchored" data-anchor-id="train_loop">train_loop</h3>
+<blockquote class="blockquote">
+<pre><code> train_loop (dataloader, model, loss_fn, optimizer, silent=False)</code></pre>
+</blockquote>
+<hr>
+<p><a href="https://github.com/DanielKick-USDA/dlgwas/blob/main/dlgwas/dlfn.py#L135" target="_blank" style="float:right; font-size:smaller">source</a></p>
+</section>
+<section id="train_error" class="level3">
+<h3 class="anchored" data-anchor-id="train_error">train_error</h3>
+<blockquote class="blockquote">
+<pre><code> train_error (dataloader, model, loss_fn, silent=False)</code></pre>
+</blockquote>
+<hr>
+<p><a href="https://github.com/DanielKick-USDA/dlgwas/blob/main/dlgwas/dlfn.py#L155" target="_blank" style="float:right; font-size:smaller">source</a></p>
+</section>
+<section id="test_loop" class="level3">
+<h3 class="anchored" data-anchor-id="test_loop">test_loop</h3>
+<blockquote class="blockquote">
+<pre><code> test_loop (dataloader, model, loss_fn, silent=False)</code></pre>
+</blockquote>
+<hr>
+<p><a href="https://github.com/DanielKick-USDA/dlgwas/blob/main/dlgwas/dlfn.py#L178" target="_blank" style="float:right; font-size:smaller">source</a></p>
+</section>
+<section id="train_nn" class="level3">
+<h3 class="anchored" data-anchor-id="train_nn">train_nn</h3>
+<blockquote class="blockquote">
+<pre><code> train_nn (nb_name, training_dataloader, testing_dataloader, model,
+           learning_rate=0.001, batch_size=64, epochs=500)</code></pre>
+</blockquote>
+<hr>
+<p><a href="https://github.com/DanielKick-USDA/dlgwas/blob/main/dlgwas/dlfn.py#L220" target="_blank" style="float:right; font-size:smaller">source</a></p>
+</section>
+<section id="yhat_loop" class="level3">
+<h3 class="anchored" data-anchor-id="yhat_loop">yhat_loop</h3>
+<blockquote class="blockquote">
+<pre><code> yhat_loop (dataloader, model)</code></pre>
+</blockquote>
+
+
+</section>
+</section>
+
+</main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    text: function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>
